@@ -1,0 +1,80 @@
+# name: CI
+
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
+#     branches: [main]
+
+# permissions:
+#   contents: read
+
+# jobs:
+#   lint:
+#     name: Lint
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-go@v5
+#         with:
+#           go-version-file: go.mod
+#       - uses: golangci/golangci-lint-action@v6
+#         with:
+#           version: latest
+
+#   test:
+#     name: Test
+#     runs-on: ubuntu-latest
+#     needs: lint
+#     services:
+#       postgres:
+#         image: postgres:16-alpine
+#         env:
+#           POSTGRES_DB: flagstone_test
+#           POSTGRES_USER: flagstone
+#           POSTGRES_PASSWORD: test_password
+#         ports:
+#           - 5432:5432
+#         options: >-
+#           --health-cmd "pg_isready -U flagstone"
+#           --health-interval 5s
+#           --health-timeout 3s
+#           --health-retries 5
+#       redis:
+#         image: redis:7-alpine
+#         ports:
+#           - 6379:6379
+#         options: >-
+#           --health-cmd "redis-cli ping"
+#           --health-interval 5s
+#           --health-timeout 3s
+#           --health-retries 5
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-go@v5
+#         with:
+#           go-version-file: go.mod
+#       - name: Run tests
+#         env:
+#           DATABASE_URL: postgres://flagstone:test_password@localhost:5432/flagstone_test?sslmode=disable
+#           REDIS_URL: redis://localhost:6379
+#         run: go test -race -coverprofile=coverage.out ./...
+#       - name: Upload coverage
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: coverage
+#           path: coverage.out
+
+#   build:
+#     name: Build
+#     runs-on: ubuntu-latest
+#     needs: test
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-go@v5
+#         with:
+#           go-version-file: go.mod
+#       - name: Build binary
+#         run: go build -o bin/flagstone ./cmd/flagstone
+#       - name: Build Docker image
+#         run: docker build -t flagstone:ci .

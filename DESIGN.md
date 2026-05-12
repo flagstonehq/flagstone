@@ -1,0 +1,725 @@
+# Flagstone — Design Decisions
+
+> This document justifies every design decision in the project. The goal is that 6 months from now, when you (or someone else) asks "why did we do X this way?", the answer is here.
+
+---
+
+## Table of Contents
+
+1. [Guiding Principles](#guiding-principles)
+2. [Tech Stack](#tech-stack)
+3. [Database Design](#database-design)
+4. [Rule Evaluation Engine](#rule-evaluation-engine)
+5. [Authentication & Authorization](#authentication--authorization)
+6. [Caching & Propagation](#caching--propagation)
+7. [API Design](#api-design)
+8. [Observability](#observability)
+9. [Infrastructure (AWS)](#infrastructure-aws)
+10. [Cost Strategy](#cost-strategy)
+11. [Competitive Landscape](#competitive-landscape)
+12. [Deferred Decisions](#deferred-decisions)
+13. [References](#references)
+
+---
+
+## Guiding Principles
+
+Before specific decisions, the principles that guide everything:
+
+**1. Boring tech wins.** At every fork we choose the technology most people already know. Postgres instead of something exotic. Go instead of the latest trendy framework. When something breaks at 3 AM, there are 50,000 StackOverflow posts ready to help.
+
+**2. Optimize for readability, not performance.** Until a benchmark says otherwise. Feature flags are an I/O-bound service (network, database), not CPU-bound. A rule evaluated with a map lookup vs an optimized switch has the same perceptible latency.
+
+**3. Zero paid infrastructure until there's traction.** Every infra decision starts from "can we do this for free?" and we only scale when a real user justifies it.
+
+**4. Design for multi-tenant from day one.** Even though we start solo, every model has `tenant_id`. Migrating to multi-tenant later is a nightmare — doing it from the start costs almost nothing.
+
+**5. Append-only by default.** Soft-delete (`archived_at`, `revoked_at`) instead of DELETE. The audit log is never modified — enforced at the database level with triggers, not just by convention. Reconstructing past state is more valuable than saving storage.
+
+**6. Security is not optional.** Auth, hashing, RBAC, rate limiting, and input validation are core features, not "we'll add it later" items. Every API endpoint is authenticated from day one.
+
+---
+
+## Tech Stack
+
+### Why Go
+
+- **Cheap concurrency**: one SSE connection per client is one goroutine (~8KB stack) — we scale to thousands without effort.
+- **Single binary**: deploy = `scp` + `systemctl restart`. No runtimes, no OS dependencies.
+- **Free cross-compile**: `GOOS=linux GOARCH=arm64 go build` and it's ready for Graviton.
+- **Consistent performance**: modern GC, predictable latencies. Matters when your SLO is "p99 < 5ms".
+- **Standard library is excellent**: `net/http`, `log/slog`, `crypto/sha256`, `encoding/json` — minimal external dependencies needed for the core.
+
+### Why Postgres and not another database
+
+- **JSONB** lets us store rules (arbitrary trees) without normalizing into 5 tables. Still queryable when needed.
+- **Real transactions**: atomic changes to flags + audit log in a single commit.
+- **CITEXT** for emails (case-insensitive) without writing `LOWER()` everywhere.
+- **pg_stat_statements**: when something is slow, we know which query it is.
+- **Any enterprise customer already has it**: "you need Postgres" is an easy sell. "You need MongoDB and ScyllaDB" is not.
+
+### Why Redis
+
+Redis fills two roles:
+
+1. **Distributed cache** between server instances (when we scale beyond one).
+2. **Pub/sub** so a change in one instance propagates to others, which in turn push to their connected SSE clients.
+
+For v1, a single instance + Redis on the same box is enough. When we scale, Redis moves to ElastiCache or a separate service.
+
+### Why REST first, gRPC later
+
+The original design proposed REST + gRPC from day one. After analysis, **gRPC adds complexity that doesn't pay off in the MVP**:
+
+- Dependency on Protocol Buffers (code generation tooling)
+- `protoc`, `buf`, `grpc-gateway` toolchain
+- Not curl-able (harder to debug)
+
+**Decision**: MVP is REST-only. gRPC is Milestone 3+, when there are SDKs in multiple languages that benefit from typed Protobuf contracts. The internal architecture keeps the transport layer thin so adding gRPC later is mechanical, not architectural.
+
+### Why OpenTelemetry as a first-class citizen
+
+This is our key market differentiator. Every flag evaluation emits:
+
+- A **span** with attributes (`flag.key`, `flag.value`, `user.id`, `rule.matched`).
+- **Metrics** in Prometheus format: counters per flag, latency histograms.
+- **Structured logs** correlated with the trace.
+
+LaunchDarkly, Flagsmith, and Unleash have integrations with observability systems. We _are_ a native piece of the OTel stack from day one. For teams already living in Grafana/Honeycomb/Datadog, this is a qualitative change.
+
+### Why SSE over WebSockets
+
+Feature flags are **unidirectional**: the server pushes changes to clients. SSE is the right tool:
+
+- Works over standard HTTP (passes through proxies, load balancers, CDNs)
+- Automatic reconnection built into the browser/client spec
+- Simpler server implementation (just `text/event-stream` responses)
+- WebSockets would be overkill (bidirectional not needed)
+- Polling wastes resources and has minimum latency of 1 poll interval
+
+Each SSE connection in Go is a goroutine (~8KB stack). With 10,000 connected SDKs = ~80MB of memory. Completely manageable.
+
+---
+
+## Database Design
+
+### Hierarchy: Tenant → Project → Environment → Flag
+
+Four levels might seem like a lot, but it mirrors how real teams organize their software:
+
+```
+Tenant: "My Company"
+  └─ Project: "Mobile App"
+       ├─ Environment: "dev"
+       ├─ Environment: "staging"
+       └─ Environment: "prod"
+  └─ Project: "Web Dashboard"
+       ├─ Environment: "dev"
+       └─ Environment: "prod"
+```
+
+A flag is defined at the **Project** level (`new-checkout`) and configured differently per **Environment** (100% in dev, 5% in prod). This separation is implemented in `flags` (definition) and `flag_environments` (per-environment configuration).
+
+**Performance consideration**: This 4-level hierarchy means every flag evaluation needs to resolve `API key → environment → flag_environment → flag → project → tenant`. That's potentially 3-4 JOINs or lookups. This is mitigated by the multi-level cache (see [Caching](#caching--propagation)), but the hot path should pre-load the full config into memory keyed by `environment_id:flag_key`.
+
+### Why UUIDs instead of bigserial
+
+- **No enumeration attacks**: nobody can infer how many customers we have by requesting `/api/flags/1`, `/api/flags/2`...
+- **Client-side generation**: useful for offline-first SDKs in the future.
+- **Mergeable**: if we ever sync data between instances, no collisions.
+
+The cost is ~16 bytes per PK vs ~8, and larger indexes. For our volume, irrelevant.
+
+### Why JSONB for rules
+
+Targeting rules are arbitrary trees:
+
+```json
+{
+  "all": [
+    { "attribute": "country", "op": "eq", "value": "AR" },
+    { "any": [
+      { "attribute": "plan", "op": "eq", "value": "premium" },
+      { "attribute": "is_admin", "op": "eq", "value": true }
+    ]}
+  ]
+}
+```
+
+Modeling this as normalized tables means:
+- A `rule_groups` table (any/all)
+- A `rule_conditions` table (attribute, op, value)
+- A `rule_groups_rule_groups` table for nesting
+- Recursive joins to reconstruct the tree
+
+With JSONB it's one column. We validate it in code (not in the DB) on input. We evaluate it in code. Much simpler, and the DB doesn't even need to understand the structure.
+
+**Tradeoff: no referential integrity for segment references.** Rules can reference segments by key. If a segment is deleted, the rules become broken. This MUST be handled at the application level — the rule engine must gracefully handle "segment not found" instead of crashing.
+
+**"What if we need to search all flags that use the `country` attribute?"** Postgres supports GIN indexes on JSONB. If that use case appears, we add one. YAGNI until then.
+
+### Why `version` in `flag_environments`
+
+Optimistic concurrency control. Without it:
+
+```
+T1: Admin A reads flag (rollout=10%)
+T2: Admin B reads flag (rollout=10%)
+T3: Admin A writes rollout=25%
+T4: Admin B writes rollout=50%   ← silently overwrites A's change
+```
+
+With `version`:
+
+```
+T3: Admin A writes rollout=25%, version becomes 2 (was 1) ✓
+T4: Admin B writes rollout=50%, expected_version=1 ✗ ERROR: version mismatch
+```
+
+**The version is auto-incremented by a database trigger**, so application code can't accidentally forget to bump it. The app's UPDATE query includes `WHERE version = $expected` and checks `rows_affected = 0` for conflicts.
+
+### Why audit_log is append-only (and enforced)
+
+The audit log is the source of truth for "what happened?". If it can be modified, it's no longer trustworthy. A company with compliance requirements (SOC2, ISO 27001) will audit this — and auditors will specifically ask if the log is immutable.
+
+**Enforcement**: A database trigger raises an exception on any UPDATE or DELETE attempt on the `audit_log` table. This is stronger than a code convention — it survives bugs, rogue queries, and direct DB access.
+
+At code level: only INSERT, never UPDATE or DELETE. At DB level: if it grows too large, we partition by month (Postgres 16 does this well with declarative partitioning). We move old partitions to cheaper storage. But we never delete.
+
+### Why hash + prefix for API keys
+
+When a user creates an API key, we show `fs_live_a3b9d2c8e4f1...` ONCE. Then we only store:
+
+- `key_hash`: SHA-256 of the full key (for validating requests)
+- `key_prefix`: first ~12 characters (`fs_live_a3b9`) so the admin can identify "ah, this is the prod key for the backend"
+
+If the database leaks, the keys can't be recovered. The user regenerates them.
+
+**Why SHA-256 and not bcrypt?** API keys are random, high-entropy strings (not human-chosen passwords). SHA-256 is appropriate for this: it's fast (intentionally — we hash on every request) and the input space is too large to brute-force. User passwords use bcrypt/argon2id — see [Authentication](#authentication--authorization).
+
+### Schema protections (added post-review)
+
+The following protections were added after a security review:
+
+| Protection | Implementation | Why |
+|---|---|---|
+| Audit log immutability | `BEFORE UPDATE OR DELETE` trigger raises exception | SOC2/ISO 27001 compliance |
+| Version auto-increment | `BEFORE UPDATE` trigger on `flag_environments` | Prevents OCC bypass from code bugs |
+| Slug regex fix | `'^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'` | Now accepts single-char slugs like `a` |
+| pgcrypto removal | Dropped `CREATE EXTENSION pgcrypto` | Unnecessary since Postgres 13+ |
+| `created_at` on `flag_environments` | Added `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | Consistency; know when config was first created |
+
+---
+
+## Rule Evaluation Engine
+
+This is the algorithmically rich part of the system. Designed in layers:
+
+```
+Input: (flag_key, environment_id, user_context)
+   ↓
+1. In-memory cache lookup (process-local)
+   ↓ miss
+2. Load flag config from Redis
+   ↓ miss
+3. Load from Postgres
+   ↓
+4. Evaluate rules in order (first match wins)
+   ↓
+5. If no rule matches → default value
+   ↓
+6. If match has rollout → consistent hashing
+   ↓
+Output: (value, reason, rule_matched_index)
+```
+
+### Data structures used
+
+**Rule tree (N-ary tree)**: Rules are trees of boolean expressions with `all` (AND), `any` (OR), and `not` nodes. Evaluation is a DFS tree traversal with short-circuit evaluation (stop at first `false` for AND, first `true` for OR). Complexity: O(n) where n = number of nodes. For typical rules (5-20 conditions), this is nanoseconds.
+
+**In-memory cache (hash map with TTL)**: A thread-safe `map[string]*FlagConfig` protected by `sync.RWMutex`. Key format: `env_id:flag_key`. Multiple concurrent readers (evaluations), exclusive writer (cache invalidation). TTL: 30 seconds as fallback.
+
+**Consistent hashing for rollouts (FNV-1a + modular arithmetic)**: Deterministic bucket assignment using `hash(flag_key + ":" + user_id) % 100`. Same user always gets the same result. Including `flag_key` prevents the same users from always being in the lucky percentage across all flags.
+
+### Why rule order matters
+
+Rules evaluate **in order** and the first match wins. This lets you express precedences:
+
+```
+Rule 1: "If admin → always true"
+Rule 2: "If in segment beta-testers → true"
+Rule 3: "Rollout 10% of the rest → true"
+Default: false
+```
+
+If rules had no order and were evaluated as OR, we couldn't guarantee admins ALWAYS see the feature, because the 10% rollout could give them `false`.
+
+### Consistent hashing for rollouts
+
+When we say "10% of users", the problem is: which 10%? And more importantly: **the same 10% every time?**
+
+Solution: hash of `(flag_key + user_id)`, modulo 100. If the result is `< 10`, the user is in the group. Since the hash is deterministic, the same user is always in or always out.
+
+```go
+func inRollout(flagKey, userID string, percentage int) bool {
+    h := fnv.New32a()
+    h.Write([]byte(flagKey + ":" + userID))
+    bucket := h.Sum32() % 100
+    return bucket < uint32(percentage)
+}
+```
+
+**Key property**: when you increase from 10% to 25%, users who were already in the 10% stay in. Only new users are added to the group. This is because `bucket < 10` is a subset of `bucket < 25`.
+
+### Why FNV and not MurmurHash or xxHash
+
+For rollouts we don't need cryptographic resistance or perfect distribution. We need it to be fast and reproducible. FNV is in Go's standard library and is sufficient. If benchmarks ever show it's the bottleneck (unlikely), we swap it.
+
+---
+
+## Authentication & Authorization
+
+### Dual auth model
+
+Flagstone has two distinct types of callers with different security requirements:
+
+| Caller | Auth method | Token lifecycle | Scope |
+|---|---|---|---|
+| **SDKs / machines** | API Key (in `Authorization` header) | Long-lived, manually rotated | Single environment |
+| **Dashboard users** | Email + password → JWT | Short-lived access + refresh | Tenant-scoped, role-based |
+
+### API Key authentication (SDKs)
+
+```
+SDK request:
+  Authorization: Bearer fs_live_a3b9d2c8e4f1...
+                        ↓
+Server:
+  1. SHA-256(key) → lookup key_hash in DB
+  2. Check revoked_at IS NULL
+  3. Check expires_at IS NULL OR expires_at > NOW()
+  4. Resolve environment_id from the key
+  5. All subsequent queries scoped to that environment
+```
+
+**Why SHA-256?** API keys are 32+ bytes of random data. They're not human-chosen passwords vulnerable to dictionary attacks. SHA-256 is appropriate because:
+- Input entropy is high enough that brute-force is infeasible
+- We hash on every request — bcrypt's intentional slowness would add ~100ms per evaluation
+- The partial index on `api_keys WHERE revoked_at IS NULL` keeps lookups fast
+
+**Key format**: `fs_{environment}_{random}` where:
+- `fs_` = Flagstone prefix (identifies the key type in logs/configs)
+- `{environment}` = `live` or `test` (human-readable hint, NOT relied upon for security)
+- `{random}` = 32 bytes of `crypto/rand`, base62 encoded
+
+### Dashboard authentication (humans)
+
+```
+Login flow:
+  1. POST /api/v1/auth/login { email, password }
+  2. Server verifies email exists
+  3. bcrypt.CompareHashAndPassword(stored_hash, password)
+  4. Generate JWT access token (15 min TTL)
+  5. Generate opaque refresh token (7 day TTL, stored in DB)
+  6. Return { access_token, refresh_token }
+  7. Client stores access_token in memory, refresh_token in httpOnly cookie
+
+Token refresh:
+  1. POST /api/v1/auth/refresh (refresh_token from cookie)
+  2. Server validates refresh token exists and is not expired
+  3. Rotate: delete old refresh token, issue new pair
+  4. Return new { access_token, refresh_token }
+```
+
+**Why bcrypt for passwords but SHA-256 for API keys?** Passwords are human-chosen and potentially weak. Bcrypt's work factor (cost=12, ~250ms) makes brute-force attacks impractical. API keys are machine-generated with full entropy — no need for the slow hash.
+
+**Why JWTs?** Stateless verification — the server doesn't need to hit the DB on every request. The JWT contains: `user_id`, `tenant_id`, `role`, `exp`. Signed with HS256 using a server secret.
+
+**Why refresh tokens in DB?** To support:
+- Revocation (logout invalidates the refresh token)
+- Session listing ("you're logged in from 3 devices")
+- Token rotation (prevents refresh token replay attacks)
+
+### Role-Based Access Control (RBAC)
+
+The `tenant_members` table assigns a role per user per tenant:
+
+| Role | Flags | Environments | API Keys | Members | Billing |
+|---|---|---|---|---|---|
+| `viewer` | Read | Read | - | - | - |
+| `member` | Read/Write | Read | Read | - | - |
+| `admin` | Full | Full | Full | Manage | - |
+| `owner` | Full | Full | Full | Full | Full |
+
+Authorization is checked in middleware after authentication:
+
+```go
+// Middleware chain for a protected endpoint:
+// 1. AuthN: extract + validate JWT → set user_id, tenant_id, role in context
+// 2. AuthZ: check role >= required_role for this endpoint
+// 3. Handler: business logic, already scoped to the authenticated tenant
+```
+
+A user can belong to multiple tenants (consultant, agency dev). The JWT specifies which tenant is "active" for this session.
+
+### Session table (planned addition)
+
+The current schema has `users` but no `sessions` table. For the JWT refresh token flow, we need:
+
+```sql
+CREATE TABLE sessions (
+    id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       UUID         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tenant_id     UUID         NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    refresh_hash  CHAR(64)     NOT NULL,  -- SHA-256 of refresh token
+    user_agent    TEXT,
+    ip_address    INET,
+    expires_at    TIMESTAMPTZ  NOT NULL,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX sessions_user_idx ON sessions(user_id);
+CREATE INDEX sessions_cleanup_idx ON sessions(expires_at) WHERE expires_at < NOW();
+```
+
+This will be added in migration `000002_add_sessions.up.sql` when dashboard auth is implemented.
+
+---
+
+## Caching & Propagation
+
+### Three-level cache
+
+```
+1. In-memory cache (Go process)     ← O(1) lookup, ~microseconds
+   ↓ miss
+2. Redis (distributed cache)         ← O(1) lookup, ~1ms network
+   ↓ miss
+3. PostgreSQL (source of truth)      ← Query, ~5-10ms
+```
+
+### Cache invalidation
+
+The classic problem: when an admin changes a flag, how long until it propagates?
+
+Strategy:
+
+1. UPDATE in Postgres (within a transaction that also INSERTs the audit log)
+2. PUBLISH on Redis pub/sub channel `flag_changes`
+3. Each subscribed server receives the message and purges its local cache for that flag
+4. Each SDK connected via SSE receives the change event
+
+Total time: typically <100ms. If Redis pub/sub fails, caches have a 30-second TTL as fallback — worst case, changes take 30 seconds.
+
+**Stale reads are acceptable.** A flag that takes 2 seconds to propagate doesn't break anything. A flag that returns inconsistent results (sometimes yes, sometimes no for the same user in the same second) does break things. We aim for eventual consistency with low latency, not strong consistency.
+
+### In-memory cache structure
+
+```go
+type CacheEntry struct {
+    Config    *FlagConfig
+    ExpiresAt time.Time
+}
+
+type FlagCache struct {
+    mu      sync.RWMutex
+    entries map[string]*CacheEntry  // key: "env_id:flag_key"
+    ttl     time.Duration           // 30 seconds default
+}
+```
+
+**Thread safety**: `sync.RWMutex` allows multiple concurrent readers (flag evaluations) but exclusive writes (cache invalidation). Alternative: `sync.Map` for read-heavy workloads (which is exactly this case — reads vastly outnumber writes).
+
+**Eviction**: A background goroutine runs every `ttl/2` and removes expired entries. Lazy eviction on read is also checked (belt and suspenders).
+
+### SSE fan-out
+
+```go
+type SSEHub struct {
+    clients    map[string]chan Event  // client_id → channel
+    register   chan Client
+    unregister chan Client
+    broadcast  chan Event
+    mu         sync.RWMutex
+}
+```
+
+Each connected SSE client has its own Go channel backed by a goroutine that writes to the HTTP response. When a change arrives, the hub iterates over all clients and sends the event to each channel. Graceful shutdown drains all client connections.
+
+---
+
+## API Design
+
+### URL structure
+
+```
+/api/v1/                          # Versioned API root
+├── auth/
+│   ├── POST   login              # Email + password → JWT
+│   ├── POST   refresh            # Refresh token → new JWT pair
+│   └── POST   logout             # Invalidate refresh token
+├── flags/
+│   ├── GET    /                   # List flags (for dashboard)
+│   ├── POST   /                   # Create flag
+│   ├── GET    /:key               # Get flag details
+│   ├── PUT    /:key               # Update flag definition
+│   ├── DELETE /:key               # Soft-delete (archive) flag
+│   └── PUT    /:key/environments/:env  # Update per-env config
+├── segments/
+│   ├── GET    /                   # List segments
+│   ├── POST   /                   # Create segment
+│   ├── GET    /:key               # Get segment
+│   ├── PUT    /:key               # Update segment
+│   └── DELETE /:key               # Archive segment
+├── environments/
+│   ├── GET    /                   # List environments
+│   └── POST   /                   # Create environment
+├── api-keys/
+│   ├── GET    /                   # List keys (prefix only)
+│   ├── POST   /                   # Create key (returns full key ONCE)
+│   └── DELETE /:id                # Revoke key
+├── audit/
+│   └── GET    /                   # Query audit log
+└── evaluate/
+    ├── POST   /flags/:key         # Evaluate single flag (SDK)
+    └── POST   /flags              # Evaluate all flags (SDK bootstrap)
+
+/healthz                           # Health check (unauthenticated)
+/stream                            # SSE endpoint (API key auth)
+```
+
+### Auth scoping
+
+- **SDK endpoints** (`/evaluate/*`, `/stream`): API Key auth → scoped to single environment
+- **Dashboard endpoints** (everything else): JWT auth → scoped to tenant, role-checked
+- **Health check**: unauthenticated
+
+### Error format
+
+```json
+{
+  "error": {
+    "code": "FLAG_NOT_FOUND",
+    "message": "Flag 'checkout-v2' does not exist in this project",
+    "request_id": "req_abc123"
+  }
+}
+```
+
+Consistent error codes allow SDKs to handle specific failures programmatically.
+
+---
+
+## Observability
+
+### What we instrument
+
+Every flag evaluation emits:
+
+```go
+// Span attributes on every evaluation
+span.SetAttributes(
+    attribute.String("flag.key", flagKey),
+    attribute.String("flag.type", flag.Type),
+    attribute.Bool("flag.enabled", config.Enabled),
+    attribute.String("flag.value", resultValue),
+    attribute.String("flag.reason", reason),      // "rule", "default", "disabled"
+    attribute.Int("flag.rule_index", ruleIndex),
+    attribute.String("user.id", userID),
+    attribute.String("environment", envSlug),
+)
+```
+
+### Prometheus metrics
+
+| Metric | Type | Description |
+|---|---|---|
+| `flagstone_evaluations_total` | Counter | Total evaluations (labels: flag, env, result) |
+| `flagstone_evaluation_duration_seconds` | Histogram | Evaluation latency |
+| `flagstone_cache_hits_total` | Counter | Cache hit rate (labels: level) |
+| `flagstone_sse_connections` | Gauge | Active SSE connections |
+| `flagstone_api_requests_total` | Counter | API requests (labels: method, path, status) |
+
+### Pre-built Grafana dashboard
+
+The project will include a JSON dashboard for Grafana that shows:
+- Flag evaluation rates and latency
+- Cache hit ratios
+- Active SSE connections
+- API error rates
+- Audit log activity
+
+---
+
+## Infrastructure (AWS)
+
+### Why AWS and not Hetzner / Fly / Railway
+
+Long-term, Hetzner is 5x cheaper. But:
+
+- The $300 AWS credits give 6+ months free even after the free tier.
+- Learning AWS is **billable skill**. Having Terraform + RDS + EC2 + IAM on your CV is worth real money in freelance.
+- Enterprise customers ask for "deploy in my AWS account". If we already know the terrain, sales are easier.
+- When we leave the free tier, we evaluate. Hetzner is still there.
+
+### Why t4g.small (Graviton ARM)
+
+- **Free until December 2026**: 750 hours/month, enough to run 24/7.
+- **2 vCPU, 2GB RAM**: enough for Go + Redis + a test workload.
+- **ARM Graviton is ~20% cheaper post-free-tier than equivalent x86**.
+- **Go cross-compiles to ARM without changes**: `GOARCH=arm64 go build`.
+
+### Network layout
+
+```
+VPC (10.0.0.0/16)
+  ├── Public subnets  (10.0.1.0/24, 10.0.2.0/24)  → Internet Gateway
+  │     EC2 lives here. Reachable from internet for HTTP/HTTPS.
+  │
+  └── Private subnets (10.0.10.0/24, 10.0.11.0/24)
+        RDS lives here. Never reachable from internet.
+```
+
+**No NAT Gateway**: costs ~$32/month (no free tier). RDS in private subnets without NAT means the DB has no outbound internet — a feature, not a bug.
+
+**Two AZs**: RDS DB Subnet Groups require at least two subnets in different AZs even for single-AZ deployment. No extra cost.
+
+### Security measures
+
+| Measure | Implementation |
+|---|---|
+| DB network isolation | Private subnets, SG allows only app SG on port 5432 |
+| SSH restriction | `ssh_allowed_cidr` has NO default — forces explicit IP config |
+| SSRF protection | IMDSv2 required (`http_tokens = "required"`) |
+| Encryption at rest | EBS + RDS `storage_encrypted = true` |
+| No hardcoded credentials | IAM instance profile with role, no access keys |
+| Audit trail | CloudTrail + audit_log table |
+| Session Manager backup | SSM policy attached — SSH-less access if port 22 is locked |
+
+### Why single-AZ for RDS
+
+Multi-AZ doubles the cost (~$26/month vs $13/month post-free-tier) for a standby replica. For v1:
+
+- We have automated backups (7 days retention).
+- If the AZ goes down, we restore in another AZ — implies ~30 minutes downtime.
+- For a service without SLAs yet, that's acceptable.
+
+When a paying customer requires 99.99% uptime, we enable Multi-AZ with a toggle in `terraform.tfvars`.
+
+---
+
+## Cost Strategy
+
+### Months 1-12 (full free tier)
+
+| Resource | Usage | Cost |
+|---|---|---|
+| EC2 t4g.small | 24/7 | $0 (free until Dec 2026) |
+| RDS db.t3.micro | 24/7 | $0 (12 months free) |
+| EBS 20GB gp3 | continuous | $0 (within 30GB free) |
+| RDS storage 20GB | continuous | $0 (within 20GB free) |
+| Outbound transfer | < 100GB/month | $0 |
+| CloudWatch | basic metrics | $0 |
+| **Total** | | **$0/month** |
+
+### Month 13+ (post RDS free tier, t4g still free)
+
+| Resource | Approximate cost |
+|---|---|
+| EC2 t4g.small | $0 (until Dec 2026) |
+| RDS db.t3.micro | ~$13/month |
+| EBS + storage | ~$5/month |
+| Transfer | ~$0-5/month |
+| **Total** | **~$20/month** |
+
+With $300 credits: **15 extra months at $20/month**. Conservatively, **24+ months running free**.
+
+### Month 24+ (post-credits, post-Graviton trial)
+
+If the project is still active:
+
+- **If it has traction** (paying customers, 500+ stars, active contributors): stay on AWS, cost justified by MRR.
+- **If it's just portfolio**: migrate to Hetzner (~$5-8/month for everything) or Fly.io free tier.
+
+### Mandatory alarms from day one
+
+Configure in CloudWatch:
+
+- **Billing alarm at $5**: early warning.
+- **Billing alarm at $20**: red alert, investigate immediately.
+- **AWS Budgets**: email notification + block at 80% of monthly budget.
+
+---
+
+## Competitive Landscape
+
+### Direct competitors
+
+| | Flagstone | **Flipt** | Unleash | Flagsmith | LaunchDarkly |
+|---|---|---|---|---|---|
+| Language | Go | Go | TypeScript | Python | ? |
+| Config model | API + DB | **Git-native (v2)** | API + DB | API + DB | API |
+| OTel native | Yes | Yes | No | No | Partial |
+| Self-hosted | Yes | Yes | Yes | Yes (limited) | No |
+| Stars | 0 (new) | **4,800+** | 13,500+ | 6,300+ | N/A |
+| Commits | 1 | **5,000+** | 10,000+ | 8,000+ | N/A |
+| Maturity | Pre-alpha | Production | Production | Production | Production |
+
+### Flipt is the primary competitor
+
+Flipt is the closest competitor: same language (Go), same philosophy (self-hosted, OTel-native), but with 5,000+ commits head start. Key differences:
+
+1. **Flipt v2 moved to Git-native configuration** — flags are defined in YAML files in a Git repo. This adds complexity for teams that want a simple API-first approach.
+2. **Flagstone stays API-first** with a traditional database backend. Create a flag via API, change it via dashboard, see the effect in seconds.
+3. **Flagstone targets simplicity over features** — Flipt has years of features we won't match. We win on ease of deployment and learning curve.
+
+### Honest assessment
+
+Flagstone is NOT going to replace Flipt for teams that already use it. Our market is:
+- Teams that haven't adopted feature flags yet (greenfield)
+- Teams that find Flipt's Git-native model too complex
+- Teams that want the simplest possible self-hosted solution
+- Solo devs / small teams that want one binary + Postgres
+
+### OpenFeature (CNCF standard)
+
+[OpenFeature](https://openfeature.dev/) is a CNCF sandbox project defining a standard API for feature flag evaluation. Supporting it is near-mandatory for any new feature flag tool — it means SDKs can use a standard interface and swap providers.
+
+**Decision**: Implement an OpenFeature Go provider in Milestone 3. This is a significant competitive advantage — it means existing OpenFeature users can adopt Flagstone without changing their application code.
+
+---
+
+## Deferred Decisions
+
+Honest list of things we know we'll need eventually, but don't implement now:
+
+| Decision | When to revisit | Estimated cost |
+|---|---|---|
+| Terraform S3 backend | When there are 2+ developers | ~$1/month |
+| Multi-AZ RDS | When a customer requires it contractually | +$13/month |
+| Application Load Balancer | When we need multiple instances or WAF | +$16/month |
+| CDN (CloudFront) | When serving geographically distributed content | Variable |
+| Secrets Manager | When there are 3+ secrets or 2+ developers | ~$0.40/secret/month |
+| Auto Scaling | When one instance is insufficient | Variable |
+| gRPC API | Milestone 3, when multi-language SDKs benefit from Protobuf | Zero (infra) |
+| Rate limiting | Milestone 1 — needed for API security | Zero (in-process) |
+| CORS configuration | When dashboard SPA or client-side SDKs exist | Zero |
+| CSRF protection | When dashboard uses cookie-based sessions | Zero |
+| Backups cross-region | When compliance requires it | Variable |
+| VPC Flow Logs | When there's a network mystery to debug | Storage cost |
+
+The principle: **each infra feature pays its cost only when there's a concrete user or requirement justifying it**. Until then, simple beats "prepared for the future".
+
+---
+
+## References
+
+- [Feature Toggles (Martin Fowler)](https://martinfowler.com/articles/feature-toggles.html)
+- [Postgres JSONB Performance](https://www.postgresql.org/docs/current/datatype-json.html)
+- [The Twelve-Factor App](https://12factor.net/)
+- [AWS Well-Architected Framework](https://aws.amazon.com/architecture/well-architected/)
+- [Designing Data-Intensive Applications (Martin Kleppmann)](https://dataintensive.net/)
+- [OpenFeature Specification](https://openfeature.dev/specification/)
+- [Flipt Documentation](https://www.flipt.io/docs)
+- [OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)
+- [JWT Best Practices (RFC 8725)](https://datatracker.ietf.org/doc/html/rfc8725)
