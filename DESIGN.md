@@ -28,6 +28,23 @@
 
 ---
 
+## Architecture Diagrams
+
+> Full visual reference: [`diagrams/flagstone-overview.svg`](./diagrams/flagstone-overview.svg)
+
+| Diagram | Maps to section |
+|---------|----------------|
+| Flagstone · Diagrama Entidad-Relación | [Database Design](#database-design) |
+| Diagrama 4: Autenticación Dual (API Keys + JWT) | [Authentication & Authorization](#authentication--authorization) |
+| Diagrama 5: Flujo de evaluación de flags (SDK Runtime) | [Rule Evaluation Engine](#rule-evaluation-engine) |
+| Diagrama 6: Publicación de cambios | [Caching & Propagation](#caching--propagation) |
+| Diagrama 7: Arquitectura AWS | [Infrastructure (AWS)](#infrastructure-aws) |
+| Diagrama 8: API Design + Health Check | [API Design](#api-design) |
+| Diagrama 9: Observabilidad — OTel + Prometheus + Grafana | [Observability](#observability) |
+| FLAGSTONE — Flujo completo DESIGN.md | Full SDK → API → Redis → Postgres → OTel sequence |
+
+---
+
 ## Guiding Principles
 
 Before specific decisions, the principles that guide everything:
@@ -108,6 +125,8 @@ Each SSE connection in Go is a goroutine (~8KB stack). With 10,000 connected SDK
 ---
 
 ## Database Design
+
+> ![Entity-Relationship Diagram](./diagrams/diagram-erd.png)
 
 ### Hierarchy: Tenant → Project → Environment → Flag
 
@@ -218,6 +237,10 @@ The following protections were added after a security review:
 ---
 
 ## Rule Evaluation Engine
+
+> ![Flag Evaluation Flow](./diagrams/diagram-flow-eval.png)
+>
+> For the complete SDK → API → Redis → Postgres → OTel sequence, see [`diagrams/flagstone-overview.svg`](./diagrams/flagstone-overview.svg).
 
 This is the algorithmically rich part of the system. Designed in layers:
 
@@ -536,6 +559,8 @@ This reads: "25% of paid users in LATAM get the feature. All internal users get 
 
 ## Authentication & Authorization
 
+> ![Dual Auth Flow](./diagrams/diagram-auth.png)
+
 ### Dual auth model
 
 Flagstone has two distinct types of callers with different security requirements:
@@ -645,6 +670,8 @@ This will be added in migration `000002_add_sessions.up.sql` when dashboard auth
 
 ## Caching & Propagation
 
+> ![Change Propagation](./diagrams/diagram-pub.png)
+
 ### Three-level cache
 
 ```
@@ -706,6 +733,8 @@ Each connected SSE client has its own Go channel backed by a goroutine that writ
 ---
 
 ## API Design
+
+> ![API Design & Health Check](./diagrams/diagram-design-api.png)
 
 ### URL structure
 
@@ -948,6 +977,8 @@ Response when degraded (503 Service Unavailable):
 
 ## Observability
 
+> ![Observability Stack](./diagrams/diagram-obs.png)
+
 ### What we instrument
 
 Every flag evaluation emits:
@@ -988,6 +1019,8 @@ The project will include a JSON dashboard for Grafana that shows:
 ---
 
 ## Infrastructure (AWS)
+
+> ![AWS Architecture](./diagrams/diagram-aws.png)
 
 ### Why AWS and not Hetzner / Fly / Railway
 

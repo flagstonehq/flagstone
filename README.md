@@ -126,41 +126,51 @@ An app you can't redeploy instantly (users take time to update):
 
 ```mermaid
 flowchart TB
-    subgraph Client["Client Application"]
-        SDK[Flagstone SDK]
-        Cache[(Local cache<br/>in-memory)]
+    subgraph Clients["Clients"]
+        SDK["SDK\n(Go / TS / Python)"]
+        Cache[("Local cache\nin-memory")]
+        Dashboard["Dashboard\n(Web UI)"]
         SDK --- Cache
     end
 
-    subgraph Server["Flagstone Server"]
-        API[REST API]
-        Engine[Rule Engine]
-        Stream[SSE Streaming]
-        Auth[Auth Layer]
+    subgraph FlagstoneServer["Flagstone Server (Go)"]
+        direction TB
+        Auth["Auth Middleware\n(API Key · JWT)"]
+        API["REST API\n/api/v1/..."]
+        Engine["Rule Engine\n(JSONB · FNV hashing)"]
+        SSE["SSE Hub\n/stream"]
         Auth --> API
         API --> Engine
-        Engine --> Stream
+        API --> SSE
     end
 
     subgraph Storage["Persistence"]
-        PG[(PostgreSQL<br/>source of truth)]
-        Redis[(Redis<br/>cache + pub/sub)]
+        PG[("PostgreSQL\nsource of truth")]
+        Redis[("Redis\ncache + pub/sub")]
     end
 
-    subgraph Observability["Observability"]
-        OTel[OTel Collector]
-        Prom[Prometheus]
-        Jaeger[Jaeger / Tempo]
+    subgraph Obs["Observability"]
+        OTel["OTel Collector"]
+        Prom["Prometheus"]
+        Tempo["Grafana Tempo"]
+        Grafana["Grafana"]
+        OTel --> Prom & Tempo
+        Prom & Tempo --> Grafana
     end
 
-    SDK -->|HTTP + API Key| Auth
-    Stream -->|SSE| SDK
-    Engine --> Redis
-    Engine --> PG
-    Server --> OTel
-    OTel --> Prom
-    OTel --> Jaeger
+    SDK     -->|"API Key · POST /evaluate"| Auth
+    Dashboard -->|"JWT · CRUD /flags /segments"| Auth
+    SSE     -->|"SSE — flag change events"| SDK
+    Engine  --> Redis & PG
+    Redis   -->|"pub/sub · invalidation"| SSE
+    FlagstoneServer -->|"traces + metrics"| OTel
 ```
+
+### Visual overview
+
+The [`diagrams/`](./diagrams/) folder contains a full architecture canvas exported from Excalidraw, covering the data model, auth flows, rule evaluation engine, pub/sub propagation, observability stack, AWS infrastructure, API design, and the complete SDK↔API sequence.
+
+[![Flagstone Architecture Overview](./diagrams/flagstone-overview.svg)](./diagrams/flagstone-overview.svg)
 
 ### Components
 
