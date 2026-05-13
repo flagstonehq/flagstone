@@ -197,7 +197,6 @@ flowchart TB
 ### Core (MVP)
 
 - [ ] Boolean flags (on/off)
-- [ ] Multivariate flags (string/number/json)
 - [ ] User and attribute targeting
 - [ ] Reusable segments
 - [ ] Percentage-based rollout with consistent hashing
@@ -209,6 +208,7 @@ flowchart TB
 
 ### Advanced (post-MVP)
 
+- [ ] Multivariate flags (string/number/json variants)
 - [ ] Real-time streaming (SSE)
 - [ ] Multi-tenancy with isolation
 - [ ] Dashboard web (CRUD + real-time)
@@ -242,15 +242,19 @@ curl -X POST http://localhost:8080/api/v1/flags \
     "default": false,
     "rules": [
       {
-        "description": "Beta testers",
-        "conditions": [
-          {"attribute": "email", "operator": "ends_with", "value": "@company.com"}
-        ],
+        "conditions": {
+          "attribute": "email", "op": "ends_with", "value": "@company.com"
+        },
         "value": true
       },
       {
-        "description": "Gradual rollout at 25%",
-        "rollout": {"percentage": 25},
+        "conditions": {
+          "all": [
+            { "attribute": "country", "op": "in", "value": ["AR", "BR", "CL"] },
+            { "attribute": "plan", "op": "neq", "value": "free" }
+          ]
+        },
+        "rollout": { "percentage": 25 },
         "value": true
       }
     ]
@@ -428,8 +432,13 @@ make run
 The API will be available at `http://localhost:8080`. Test with:
 
 ```bash
+# Liveness check — is the process alive?
 curl http://localhost:8080/healthz
-# {"status":"ok","version":"dev"}
+# {"status":"ok","version":"dev","uptime_seconds":12}
+
+# Readiness check — can it serve traffic? (checks Postgres + Redis)
+curl http://localhost:8080/readyz
+# {"status":"ready","checks":{"postgres":{"status":"up","latency_ms":2},"redis":{"status":"up","latency_ms":1}}}
 ```
 
 ### Common commands

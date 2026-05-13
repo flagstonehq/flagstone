@@ -10,9 +10,15 @@
 2. [Tech Stack](#tech-stack)
 3. [Database Design](#database-design)
 4. [Rule Evaluation Engine](#rule-evaluation-engine)
+   - [Rules Schema Specification](#rules-schema-specification)
+   - [Evaluation Flow (complete)](#evaluation-flow-complete)
+   - [Error Policy](#error-policy-resilience-over-correctness)
+   - [Rollout Configuration Spec](#rollout-configuration-spec)
 5. [Authentication & Authorization](#authentication--authorization)
 6. [Caching & Propagation](#caching--propagation)
 7. [API Design](#api-design)
+   - [Evaluation API Contracts](#evaluation-api-contracts)
+   - [Health Check Design](#health-check-design)
 8. [Observability](#observability)
 9. [Infrastructure (AWS)](#infrastructure-aws)
 10. [Cost Strategy](#cost-strategy)
@@ -275,6 +281,257 @@ func inRollout(flagKey, userID string, percentage int) bool {
 
 For rollouts we don't need cryptographic resistance or perfect distribution. We need it to be fast and reproducible. FNV is in Go's standard library and is sufficient. If benchmarks ever show it's the bottleneck (unlikely), we swap it.
 
+### Rules Schema Specification
+
+The `rules` column in `flag_environments` is a JSONB array. Each element is a **rule object** evaluated in order (first match wins). The formal spec:
+
+```jsonc
+// flag_environments.rules :: Rule[]
+[
+  {
+    "conditions": <ConditionNode>,   // required — the boolean expression tree
+    "rollout": <RolloutConfig>,       // optional — if absent, match = 100% on
+    "value": true                     // optional — override value on match (default: true)
+  }
+]
+```
+
+#### ConditionNode types
+
+A `ConditionNode` is one of four shapes:
+
+```jsonc
+// 1. Leaf — single attribute comparison
+{
+  "attribute": "country",       // string, required — key in user context
+  "op": "eq",                   // string, required — operator (see table below)
+  "value": "AR"                 // any, required — comparison target
+}
+
+// 2. AND — all children must match
+{
+  "all": [ <ConditionNode>, <ConditionNode>, ... ]   // min 1 child
+}
+
+// 3. OR — at least one child must match
+{
+  "any": [ <ConditionNode>, <ConditionNode>, ... ]   // min 1 child
+}
+
+// 4. NOT — single child, result inverted
+{
+  "not": <ConditionNode>
+}
+```
+
+#### Supported operators
+
+| Operator | Type | Description | Example value |
+|---|---|---|---|
+| `eq` | any | Exact equality (type-coerced) | `"AR"`, `true`, `42` |
+| `neq` | any | Not equal | `"AR"` |
+| `gt` | number | Greater than | `18` |
+| `gte` | number | Greater than or equal | `18` |
+| `lt` | number | Less than | `100` |
+| `lte` | number | Less than or equal | `100` |
+| `in` | array | Value is in the list | `["AR", "BR", "CL"]` |
+| `not_in` | array | Value is not in the list | `["CN", "RU"]` |
+| `contains` | string | Substring match | `"premium"` |
+| `starts_with` | string | Prefix match | `"user_"` |
+| `ends_with` | string | Suffix match | `"@company.com"` |
+| `matches` | string | Regex match (RE2 syntax) | `"^v[0-9]+$"` |
+| `exists` | - | Attribute is present in context | `true` (ignored) |
+| `not_exists` | - | Attribute is absent from context | `true` (ignored) |
+| `segment` | string | User matches named segment | `"beta-testers"` |
+
+**Type coercion rules**: The engine compares as the type of `value` in the rule. If the user context attribute cannot be coerced (e.g., `"abc"` vs numeric `gt`), the condition evaluates to `false` — never errors.
+
+**`segment` operator**: The `value` is a segment key. The engine loads the segment's own condition tree and evaluates it recursively. Circular references (segment A references segment B which references A) are detected by maintaining a visited set — if a cycle is found, the condition evaluates to `false` and a warning is logged.
+
+**`matches` operator**: Uses Go's `regexp.MatchString` (RE2 syntax). The pattern is compiled once and cached. Invalid regex patterns cause the condition to evaluate to `false` + error log (never panic).
+
+#### Validation rules (enforced on write via API)
+
+1. `conditions` must be a valid `ConditionNode` (recursively)
+2. Maximum tree depth: 10 levels (prevents abuse)
+3. Maximum total nodes per rule: 50 (prevents combinatorial explosion)
+4. `op` must be one of the supported operators
+5. `segment` references must exist at write time (warning, not error — segments can be deleted later)
+6. `rollout.percentage` must be 0-100 if present
+7. `rules` array maximum length: 100 rules per flag-environment
+
+### Evaluation Flow (complete)
+
+The full evaluation path from SDK request to response, with every decision point:
+
+```
+SDK Request: POST /api/v1/evaluate/flags/:key
+  Headers: Authorization: Bearer fs_live_...
+  Body: { "context": { "user_id": "u123", "country": "AR", "plan": "premium" } }
+
+Step 1: AUTH
+  ├─ Extract API key from Authorization header
+  ├─ SHA-256(key) → lookup in api_keys table
+  ├─ Fail? → 401 Unauthorized (generic message, no key details)
+  ├─ Revoked/expired? → 401 Unauthorized
+  └─ Success → extract environment_id, tenant_id from key record
+
+Step 2: RESOLVE FLAG
+  ├─ key = "env_id:flag_key"
+  ├─ Check in-memory cache → hit? use it (if not expired)
+  ├─ Check Redis cache → hit? use it, populate in-memory
+  ├─ Query Postgres: flag + flag_environment + rules
+  ├─ Flag not found? → return { value: false, reason: "FLAG_NOT_FOUND" }
+  ├─ Flag archived? → return { value: false, reason: "FLAG_ARCHIVED" }
+  └─ Populate both caches, continue
+
+Step 3: CHECK ENABLED
+  ├─ flag_environment.enabled = false?
+  │   → return { value: false, reason: "DISABLED" }
+  └─ enabled = true → continue to rules
+
+Step 4: EVALUATE RULES (in order, first match wins)
+  For each rule in flag_environment.rules:
+  │
+  ├─ Evaluate rule.conditions (recursive tree walk)
+  │   ├─ Leaf node: compare context[attribute] with value using op
+  │   │   ├─ Attribute missing from context?
+  │   │   │   ├─ op = "exists" → false
+  │   │   │   ├─ op = "not_exists" → true
+  │   │   │   └─ any other op → false (missing = no match)
+  │   │   ├─ Type mismatch? → false (never error)
+  │   │   └─ op = "segment"? → load segment, evaluate recursively
+  │   ├─ "all" node: short-circuit AND (stop at first false)
+  │   ├─ "any" node: short-circuit OR (stop at first true)
+  │   └─ "not" node: invert child result
+  │
+  ├─ Conditions matched?
+  │   ├─ No → continue to next rule
+  │   └─ Yes → check rollout
+  │       ├─ No rollout config? → return { value: rule.value, reason: "RULE_MATCH", rule_index: i }
+  │       └─ Has rollout?
+  │           ├─ No user_id in context? → use percentage as probability (non-deterministic)
+  │           ├─ hash(flag_key + ":" + user_id) % 100 < percentage?
+  │           │   ├─ Yes → return { value: rule.value, reason: "RULE_MATCH", rule_index: i }
+  │           │   └─ No → continue to next rule (NOT default — next rule gets a chance)
+  │           └─ (rollout miss falls through to next rule)
+  │
+  └─ No rules matched → return { value: false, reason: "DEFAULT" }
+
+Step 5: EMIT TELEMETRY (non-blocking, after response)
+  ├─ OTel span: flag.key, flag.value, flag.reason, user.id, environment
+  ├─ Prometheus counter: flagstone_evaluations_total{flag, env, result}
+  └─ Prometheus histogram: flagstone_evaluation_duration_seconds
+```
+
+**Critical behavior: rollout miss falls through.** When a rule's conditions match but the user is outside the rollout percentage, evaluation continues to the next rule. This allows stacking:
+
+```jsonc
+// Rule 1: 100% for admins (no rollout = always)
+// Rule 2: 50% rollout for everyone
+// If admin is outside the 50%, Rule 1 catches them first.
+// If non-admin is outside the 50%, they fall to default (false).
+```
+
+**No `user_id` in context for rollout**: If the SDK doesn't send a `user_id` and a rule has a rollout, the engine uses `rand.Intn(100) < percentage` — non-deterministic. This is documented behavior: "for consistent rollouts, always send `user_id`." A warning metric is incremented.
+
+### Error Policy: Resilience over Correctness
+
+**Core principle: the evaluation engine never returns an error to the SDK. It always returns a value.**
+
+This is a deliberate design choice. Feature flags control live production behavior. If the engine returns an error, the SDK has to decide what to do — and most developers will handle it poorly (crash, log and ignore, default to a random value). Instead, we degrade gracefully:
+
+| Failure scenario | Engine behavior | Telemetry |
+|---|---|---|
+| Flag not found | Return `false` + reason `FLAG_NOT_FOUND` | Warning log, counter increment |
+| Flag archived | Return `false` + reason `FLAG_ARCHIVED` | Info log |
+| Flag disabled | Return `false` + reason `DISABLED` | Normal (expected path) |
+| Malformed rule JSON | Skip rule, continue to next | Error log + `engine_errors_total{type="malformed_rule"}` |
+| Unknown operator | Condition → `false`, continue | Error log + `engine_errors_total{type="unknown_op"}` |
+| Segment not found | Condition → `false`, continue | Warning log + `engine_errors_total{type="segment_missing"}` |
+| Segment circular ref | Condition → `false`, continue | Error log + `engine_errors_total{type="segment_cycle"}` |
+| Regex compile fail | Condition → `false`, continue | Error log + `engine_errors_total{type="bad_regex"}` |
+| Type coercion fail | Condition → `false`, continue | Debug log (high volume, low severity) |
+| Redis down | Fall through to Postgres | Warning log, circuit breaker metric |
+| Postgres down | Return cached value if available, else `false` | Critical log + alert |
+| Panic in eval | Recover, return `false` + reason `INTERNAL_ERROR` | Critical log + stack trace |
+
+**Why not return the default value from the flag definition?** Because in MVP, flags are boolean. The default is always `false`. When we add variants (multivariate), the flag definition will carry a `default_value` field and the engine will use that instead of hardcoded `false`.
+
+**Panic recovery**: Every evaluation runs inside a `defer func() { recover() }()`. A bug in rule evaluation must never crash the process. The recovered panic is logged with full stack trace and the evaluation returns `false`.
+
+### Rollout Configuration Spec
+
+The `rollout` field in a rule object controls gradual rollout. The formal spec:
+
+```jsonc
+// Rule.rollout :: RolloutConfig | null
+{
+  "percentage": 25,              // required — 0-100, integer
+  "seed": "experiment-q4-2024"   // optional — override hash seed (default: flag_key)
+}
+```
+
+#### Fields
+
+**`percentage`** (integer, 0-100): The percentage of users who pass the rollout gate. The engine computes `hash(seed + ":" + user_id) % 100 < percentage`.
+
+- `0` = nobody passes (equivalent to no rule match)
+- `100` = everyone passes (equivalent to no rollout config)
+- Values outside 0-100 are rejected at write time by the API
+
+**`seed`** (string, optional): Overrides the default hash seed (`flag_key`). Use cases:
+
+1. **Correlated rollouts**: Two flags with the same seed will include the same users at the same percentage. Useful for features that must ship together.
+2. **Decorrelated rollouts**: Two flags with different seeds will have independent user selection. This is the default behavior (each flag uses its own key as seed).
+3. **Re-rolling**: If a rollout at 10% had bad results and you want a different 10%, change the seed. The hash picks a different bucket of users.
+
+#### Hash function detail
+
+```go
+func inRollout(seed, userID string, percentage int) bool {
+    if percentage >= 100 {
+        return true
+    }
+    if percentage <= 0 {
+        return false
+    }
+    h := fnv.New32a()
+    h.Write([]byte(seed + ":" + userID))
+    bucket := h.Sum32() % 100
+    return bucket < uint32(percentage)
+}
+```
+
+The `seed` defaults to `flag_key` if not specified in the rollout config.
+
+#### Monotonic rollout guarantee
+
+When increasing percentage from N to M (where M > N): all users who were in the N% group remain in the M% group. This is because the hash is deterministic and `bucket < N` is a strict subset of `bucket < M`.
+
+When **decreasing** percentage: users are removed from the group. This is expected behavior but should be documented clearly in the dashboard UI ("reducing rollout will remove users from the feature").
+
+#### Full rule example with rollout
+
+```json
+[
+  {
+    "conditions": { "all": [
+      { "attribute": "country", "op": "in", "value": ["AR", "BR", "CL"] },
+      { "attribute": "plan", "op": "neq", "value": "free" }
+    ]},
+    "rollout": { "percentage": 25 },
+    "value": true
+  },
+  {
+    "conditions": { "attribute": "is_internal", "op": "eq", "value": true },
+    "value": true
+  }
+]
+```
+
+This reads: "25% of paid users in LATAM get the feature. All internal users get it regardless."
+
 ---
 
 ## Authentication & Authorization
@@ -508,6 +765,185 @@ Each connected SSE client has its own Go channel backed by a goroutine that writ
 
 Consistent error codes allow SDKs to handle specific failures programmatically.
 
+### Evaluation API Contracts
+
+These are the most critical endpoints — they're in the hot path of every SDK request. Specified here so SDK authors and the engine implementation share the same contract.
+
+#### Single flag evaluation
+
+```
+POST /api/v1/evaluate/flags/:key
+Authorization: Bearer fs_live_...
+Content-Type: application/json
+
+Request body:
+{
+  "context": {                    // required — user/request attributes
+    "user_id": "u_abc123",        // recommended — needed for consistent rollouts
+    "country": "AR",              // arbitrary key-value pairs
+    "plan": "premium",
+    "is_admin": true,
+    "app_version": "2.4.1"
+  }
+}
+
+Success response (200 OK):
+{
+  "key": "new-checkout",
+  "value": true,                  // boolean (MVP); will become any type with variants
+  "reason": "RULE_MATCH",         // enum: see table below
+  "rule_index": 0,                // which rule matched (-1 if none)
+  "request_id": "req_d4f8a2"     // for debugging, correlates with OTel trace
+}
+
+Error responses:
+  401 Unauthorized — invalid/revoked/expired API key
+  {
+    "error": {
+      "code": "UNAUTHORIZED",
+      "message": "Invalid or expired API key",
+      "request_id": "req_e5c1b3"
+    }
+  }
+```
+
+Note: there is no 404 for flag not found. A missing flag returns `200 OK` with `value: false` and `reason: "FLAG_NOT_FOUND"`. This is intentional — see [Error Policy](#error-policy-resilience-over-correctness). SDKs should never crash because a flag doesn't exist yet.
+
+#### Bulk evaluation (all flags)
+
+Used by SDKs at startup to bootstrap their local cache with all flag values for the authenticated environment.
+
+```
+POST /api/v1/evaluate/flags
+Authorization: Bearer fs_live_...
+Content-Type: application/json
+
+Request body:
+{
+  "context": {
+    "user_id": "u_abc123",
+    "country": "AR",
+    "plan": "premium"
+  }
+}
+
+Success response (200 OK):
+{
+  "flags": {
+    "new-checkout": {
+      "value": true,
+      "reason": "RULE_MATCH",
+      "rule_index": 0
+    },
+    "dark-mode": {
+      "value": false,
+      "reason": "DISABLED",
+      "rule_index": -1
+    },
+    "beta-dashboard": {
+      "value": false,
+      "reason": "DEFAULT",
+      "rule_index": -1
+    }
+  },
+  "environment": "production",
+  "evaluated_at": "2024-11-15T03:22:41Z",
+  "request_id": "req_f7a2c4"
+}
+```
+
+**Performance note**: Bulk evaluation loads ALL flags for the environment in a single Postgres query (or cache hit), then evaluates each against the provided context. This is O(F × R) where F = number of flags and R = average rules per flag. For typical deployments (50 flags, 5 rules each), this completes in <10ms.
+
+**SDK bootstrap flow**:
+1. SDK starts → `POST /evaluate/flags` with user context → gets all current values
+2. SDK opens SSE connection → receives real-time updates
+3. On SSE event → re-evaluate changed flag locally OR re-fetch single flag
+
+#### Evaluation reason enum
+
+| Reason | Meaning |
+|---|---|
+| `RULE_MATCH` | A rule's conditions matched (and rollout passed, if applicable) |
+| `DEFAULT` | No rule matched; returned the default value |
+| `DISABLED` | Flag exists but `enabled = false` in this environment |
+| `FLAG_NOT_FOUND` | Flag key doesn't exist in this project |
+| `FLAG_ARCHIVED` | Flag was soft-deleted |
+| `INTERNAL_ERROR` | Engine panicked and recovered (should never happen) |
+
+#### Context requirements
+
+The `context` object is a flat `map[string]any`. Rules reference attributes by key. Constraints:
+
+- **Maximum keys**: 100 (reject with 400 if exceeded — prevents abuse)
+- **Maximum key length**: 128 characters
+- **Maximum string value length**: 1024 characters
+- **Allowed value types**: string, number (float64), boolean, array of strings
+- **`user_id`**: not required, but strongly recommended. Without it, rollouts become non-deterministic.
+- **Reserved keys**: none currently, but keys starting with `_fs_` are reserved for future engine use
+
+### Health Check Design
+
+Two health endpoints with different purposes:
+
+#### Liveness: `/healthz`
+
+```
+GET /healthz
+
+Response (200 OK):
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "uptime_seconds": 3847
+}
+```
+
+**Purpose**: "Is the process alive?" Used by container orchestrators (ECS, k8s) to decide whether to restart the process. This endpoint does NOT check dependencies — if Postgres is down but the process is alive, liveness still returns 200.
+
+**Auth**: None. Must be callable by load balancers and orchestrators without credentials.
+
+**Behavior**: Always returns 200 if the HTTP server is accepting connections. The only way this fails is if the process is dead or the listener is closed.
+
+#### Readiness: `/readyz`
+
+```
+GET /readyz
+
+Response when healthy (200 OK):
+{
+  "status": "ready",
+  "checks": {
+    "postgres": { "status": "up", "latency_ms": 2 },
+    "redis": { "status": "up", "latency_ms": 1 },
+    "cache": { "status": "warm", "entries": 142 }
+  }
+}
+
+Response when degraded (503 Service Unavailable):
+{
+  "status": "not_ready",
+  "checks": {
+    "postgres": { "status": "down", "error": "connection refused" },
+    "redis": { "status": "up", "latency_ms": 1 },
+    "cache": { "status": "cold", "entries": 0 }
+  }
+}
+```
+
+**Purpose**: "Can this instance serve traffic?" Used by load balancers to remove unhealthy instances from the pool. Checks:
+
+1. **Postgres**: `SELECT 1` with 2-second timeout. If this fails, the instance cannot evaluate flags that aren't cached.
+2. **Redis**: `PING` with 1-second timeout. If this fails, the instance can still serve from Postgres but with degraded latency.
+3. **Cache**: Reports whether the in-memory cache has been populated. A cold cache after startup is expected (warm-up period).
+
+**Readiness logic**:
+- Postgres UP → 200 (Redis and cache are nice-to-have)
+- Postgres DOWN → 503 (cannot guarantee correct evaluations)
+
+**Auth**: None. Same reasoning as liveness.
+
+**Why two endpoints instead of one?** A single `/health` endpoint conflates two questions. If the process is alive but Postgres is down, we want the orchestrator to keep the process running (don't restart — it might recover) but remove it from the load balancer (don't send traffic). Two endpoints give the operator precise control.
+
 ---
 
 ## Observability
@@ -707,6 +1143,10 @@ Honest list of things we know we'll need eventually, but don't implement now:
 | CSRF protection | When dashboard uses cookie-based sessions | Zero |
 | Backups cross-region | When compliance requires it | Variable |
 | VPC Flow Logs | When there's a network mystery to debug | Storage cost |
+| Multivariate flags (variants) | Milestone 2 — when boolean on/off is insufficient | Zero (schema + engine change) |
+| Scheduled flags | Milestone 2 — `activate_at`/`deactivate_at` on `flag_environments` + background goroutine | Zero |
+| Flag dependencies | Never — resolve in client code. Complexity doesn't justify the coupling. | N/A |
+| OpenFeature Go provider | Milestone 3 — after core is stable | Zero |
 
 The principle: **each infra feature pays its cost only when there's a concrete user or requirement justifying it**. Until then, simple beats "prepared for the future".
 

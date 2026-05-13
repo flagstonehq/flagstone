@@ -308,7 +308,7 @@ Rules stored in `flag_environments.rules` and `segments.rules` are JSONB — the
 | Max conditions per rule | 50 | Prevents DoS via complex rules that take too long to evaluate |
 | Max rules per flag | 100 | Prevents unbounded growth |
 | Max JSONB size | 64 KB | Prevents memory exhaustion |
-| Operator whitelist | `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`, `starts_with`, `ends_with`, `in`, `not_in`, `matches` | Prevents injection of unknown operators |
+| Operator whitelist | `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`, `starts_with`, `ends_with`, `in`, `not_in`, `matches`, `exists`, `not_exists`, `segment` | Prevents injection of unknown operators |
 | Attribute name format | `^[a-zA-Z_][a-zA-Z0-9_.]{0,63}$` | Prevents weird attribute names |
 | Segment reference validation | Must exist in same project | Prevents dangling references (soft check — segment could be archived later) |
 
