@@ -330,6 +330,27 @@ Rules stored in `flag_environments.rules` and `segments.rules` are JSONB — the
 
 All database queries use parameterized statements (`$1`, `$2`, etc.). No string concatenation of user input into SQL. This is enforced architecturally: the storage layer accepts Go types, never raw strings that could contain SQL.
 
+### Request body size limit
+
+Every mutating endpoint wraps the request body with `http.MaxBytesReader` before decoding JSON. Without this, a malicious client can send a multi-GB body and exhaust server memory.
+
+```go
+// Applied in a middleware, before any handler reads r.Body
+r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB hard limit
+```
+
+The `json.NewDecoder` will return an error if the body exceeds this limit. The handler returns `413 Request Entity Too Large`.
+
+### Content-Type enforcement
+
+Mutation endpoints (`POST`, `PUT`, `PATCH`) reject requests without `Content-Type: application/json` with `415 Unsupported Media Type` before reading the body. This prevents accidental form submissions and removes a class of CSRF vectors where the browser automatically sends `application/x-www-form-urlencoded` cross-origin.
+
+### ReDoS safety
+
+The `matches` operator in the rule engine compiles and evaluates regular expressions from flag rule definitions. Go's `regexp` package uses the **RE2 engine**, which guarantees O(n) time complexity for all inputs regardless of pattern complexity. It is not vulnerable to catastrophic backtracking (ReDoS attacks). This is a deliberate reason for using Go's standard library `regexp` instead of PCRE or other backtracking engines.
+
+Invalid regex patterns evaluate to `false` and emit an error log — they never crash the process or block the goroutine.
+
 ---
 
 ## Rate Limiting
@@ -459,6 +480,7 @@ Internet
 | T15 | **Stale flag evaluation** | Cache returns old value | Acceptable by design. TTL 30s as worst case. Redis pub/sub for fast invalidation. SDKs fallback to cached value if server is unreachable. | Accepted risk |
 | T16 | **API key in logs/URLs** | Key appears in access logs or query strings | Keys are sent in Authorization header (not URL). Server never logs full key values — only key_prefix. | Mitigated |
 | T17 | **CORS bypass** | Cross-origin requests from malicious sites | CORS whitelist configured per deployment. Dashboard and API on same origin when possible. | Planned (M2) |
+| T18 | **Bootstrap TOCTOU** | Two simultaneous `POST /setup` requests both pass the "no tenants exist" check and create duplicate owner accounts | `INSERT INTO tenants ... WHERE NOT EXISTS (SELECT 1 FROM tenants)` in a single atomic statement. If `rows affected = 0`, return `409 Conflict`. The DB uniqueness constraint on `tenants.slug` is a secondary guard. | Mitigated |
 
 ### Accepted risks
 

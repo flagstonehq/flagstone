@@ -9,22 +9,29 @@
 1. [Guiding Principles](#guiding-principles)
 2. [Tech Stack](#tech-stack)
 3. [Database Design](#database-design)
+   - [Initial Schema (Migration 000001)](#initial-schema-migration-000001)
+   - [Zero-downtime Migration Strategy](#zero-downtime-migration-strategy)
 4. [Rule Evaluation Engine](#rule-evaluation-engine)
    - [Rules Schema Specification](#rules-schema-specification)
    - [Evaluation Flow (complete)](#evaluation-flow-complete)
    - [Error Policy](#error-policy-resilience-over-correctness)
    - [Rollout Configuration Spec](#rollout-configuration-spec)
 5. [Authentication & Authorization](#authentication--authorization)
+   - [Onboarding & Bootstrap Flow](#onboarding--bootstrap-flow)
 6. [Caching & Propagation](#caching--propagation)
+   - [SDK Bootstrap Race Condition](#sdk-bootstrap-race-condition)
 7. [API Design](#api-design)
    - [Evaluation API Contracts](#evaluation-api-contracts)
    - [Health Check Design](#health-check-design)
+   - [SSE Event Format](#sse-event-format)
+   - [SSE Reconnection & Backoff](#sse-reconnection--backoff)
 8. [Observability](#observability)
 9. [Infrastructure (AWS)](#infrastructure-aws)
 10. [Cost Strategy](#cost-strategy)
 11. [Competitive Landscape](#competitive-landscape)
-12. [Deferred Decisions](#deferred-decisions)
-13. [References](#references)
+12. [Implementation Conventions](#implementation-conventions)
+13. [Deferred Decisions](#deferred-decisions)
+14. [References](#references)
 
 ---
 
@@ -234,6 +241,54 @@ The following protections were added after a security review:
 | pgcrypto removal | Dropped `CREATE EXTENSION pgcrypto` | Unnecessary since Postgres 13+ |
 | `created_at` on `flag_environments` | Added `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | Consistency; know when config was first created |
 
+### Initial Schema (Migration 000001)
+
+The first migration (`migrations/000001_initial.up.sql`) creates all core tables. Summary:
+
+| Table | Purpose | Key columns |
+|---|---|---|
+| `tenants` | Top-level isolation unit | `id`, `slug`, `name` |
+| `users` | Human accounts (dashboard) | `id`, `email` (CITEXT), `password_hash` |
+| `tenant_members` | User-to-tenant membership + role | `user_id`, `tenant_id`, `role` |
+| `projects` | Grouping of flags within a tenant | `id`, `tenant_id`, `slug`, `name` |
+| `environments` | dev/staging/prod per project | `id`, `project_id`, `slug`, `name` |
+| `api_keys` | Machine auth, scoped to environment | `key_hash`, `key_prefix`, `environment_id`, `revoked_at` |
+| `flags` | Flag definition (project-level) | `id`, `project_id`, `key`, `type`, `archived_at` |
+| `flag_environments` | Per-env flag config + rules | `flag_id`, `environment_id`, `enabled`, `rules` (JSONB), `version` |
+| `segments` | Reusable user groups | `id`, `project_id`, `key`, `conditions` (JSONB) |
+| `audit_log` | Append-only change history | `id`, `tenant_id`, `actor_id`, `action`, `payload` (JSONB) |
+
+Database-level protections in the same migration:
+- `BEFORE UPDATE OR DELETE` trigger on `audit_log` → raises exception (immutability)
+- `BEFORE UPDATE` trigger on `flag_environments` → auto-increments `version`
+- Partial index on `api_keys WHERE revoked_at IS NULL` → fast auth lookups
+- GIN index on `flag_environments(rules)` → future JSONB queries if needed
+
+### Zero-downtime Migration Strategy
+
+All migrations follow the **expand-contract pattern** to avoid table locks during rolling deploys:
+
+| Phase | Operation | Safe? |
+|---|---|---|
+| **Expand** | Add nullable column, add table, add index `CONCURRENTLY` | Yes — old code ignores new additions |
+| **Migrate** | Backfill data in batches | Yes — background, no locks |
+| **Contract** | Drop old column/table, add `NOT NULL` constraint | Yes — only after old code is fully deployed |
+
+**Rules enforced on every migration**:
+1. Never rename a column or table in a single step — add new, backfill, drop old.
+2. Never add a `NOT NULL` column without a `DEFAULT` in the same migration.
+3. Always use `CREATE INDEX CONCURRENTLY` (non-blocking). `golang-migrate` must run this outside a transaction — use the `-- migrate: no-transaction` annotation.
+4. Migrations that scan > 1M rows must run as a separate backfill job, not inline.
+
+**Multi-instance concurrency**: `golang-migrate` uses a Postgres advisory lock (`pg_advisory_lock`) so only one instance runs migrations at a time. Others wait and detect the schema is already up-to-date when the lock is released.
+
+**Recommended rolling deploy sequence**:
+```
+1. Run migration (expand phase) — new structure exists, old code still works
+2. Deploy new application code — reads and writes new structure
+3. Run contract migration — drops old structure once no old code is running
+```
+
 ---
 
 ## Rule Evaluation Engine
@@ -439,7 +494,7 @@ Step 4: EVALUATE RULES (in order, first match wins)
   │           │   └─ No → continue to next rule (NOT default — next rule gets a chance)
   │           └─ (rollout miss falls through to next rule)
   │
-  └─ No rules matched → return { value: false, reason: "DEFAULT" }
+  └─ No rules matched → return { value: flag_environment.default_value ?? flag.default_value ?? false, reason: "DEFAULT" }
 
 Step 5: EMIT TELEMETRY (non-blocking, after response)
   ├─ OTel span: flag.key, flag.value, flag.reason, user.id, environment
@@ -475,11 +530,11 @@ This is a deliberate design choice. Feature flags control live production behavi
 | Segment circular ref | Condition → `false`, continue | Error log + `engine_errors_total{type="segment_cycle"}` |
 | Regex compile fail | Condition → `false`, continue | Error log + `engine_errors_total{type="bad_regex"}` |
 | Type coercion fail | Condition → `false`, continue | Debug log (high volume, low severity) |
-| Redis down | Fall through to Postgres | Warning log, circuit breaker metric |
+| Redis down | Fall through to Postgres | Warning log, `redis_fallback_total` counter |
 | Postgres down | Return cached value if available, else `false` | Critical log + alert |
 | Panic in eval | Recover, return `false` + reason `INTERNAL_ERROR` | Critical log + stack trace |
 
-**Why not return the default value from the flag definition?** Because in MVP, flags are boolean. The default is always `false`. When we add variants (multivariate), the flag definition will carry a `default_value` field and the engine will use that instead of hardcoded `false`.
+**Default value resolution order**: `flag_environment.default_value` (per-env override) → `flag.default_value` (project-level default) → `false` (hardcoded fallback). Both columns exist in the schema from day one so the engine always reads them — no code change needed when multivariate variants are added.
 
 **Panic recovery**: Every evaluation runs inside a `defer func() { recover() }()`. A bug in rule evaluation must never crash the process. The recovered panic is logged with full stack trace and the evaluation returns `false`.
 
@@ -666,6 +721,72 @@ CREATE INDEX sessions_cleanup_idx ON sessions(expires_at) WHERE expires_at < NOW
 
 This will be added in migration `000002_add_sessions.up.sql` when dashboard auth is implemented.
 
+### Onboarding & Bootstrap Flow
+
+A fresh self-hosted Flagstone installation needs a one-time setup before any tenant exists.
+
+#### Bootstrap endpoint
+
+```
+POST /api/v1/setup
+(no auth — only works when zero tenants exist)
+
+Body:
+{
+  "tenant_name": "Acme Corp",
+  "admin_email": "admin@acme.com",
+  "admin_password": "..."
+}
+
+Response 201 Created:
+{
+  "tenant_id": "...",
+  "user_id": "...",
+  "access_token": "...",
+  "refresh_token": "..."
+}
+
+Response 409 Conflict (any tenant already exists):
+{
+  "error": { "code": "ALREADY_INITIALIZED", "message": "This instance is already set up." }
+}
+```
+
+`/api/v1/setup` is the only unauthenticated write endpoint in the system. It returns `409` if any tenant exists, preventing unauthorized bootstrap on a running installation.
+
+#### Project & environment creation
+
+After bootstrap, the owner creates the first project. Projects automatically receive three default environments (`development`, `staging`, `production`) — created by application code on `POST /api/v1/projects`, not by a DB trigger, to keep the schema simple.
+
+```
+POST /api/v1/projects
+Authorization: Bearer <access_token>
+
+Body: { "name": "My App", "slug": "my-app" }
+
+Response 201:
+{
+  "id": "...",
+  "slug": "my-app",
+  "environments": [
+    { "id": "...", "slug": "development" },
+    { "id": "...", "slug": "staging" },
+    { "id": "...", "slug": "production" }
+  ]
+}
+```
+
+#### Full first-run sequence
+
+```
+1. POST /api/v1/setup        → creates tenant + owner user + returns session
+2. POST /api/v1/projects     → creates first project + default environments
+3. POST /api/v1/api-keys     → creates SDK key scoped to "production" environment
+4. SDK configured with key   → ready to evaluate flags
+```
+
+Total steps from zero to first evaluation: 4 API calls.
+
 ---
 
 ## Caching & Propagation
@@ -697,6 +818,22 @@ Total time: typically <100ms. If Redis pub/sub fails, caches have a 30-second TT
 
 **Stale reads are acceptable.** A flag that takes 2 seconds to propagate doesn't break anything. A flag that returns inconsistent results (sometimes yes, sometimes no for the same user in the same second) does break things. We aim for eventual consistency with low latency, not strong consistency.
 
+**Publish-after-commit**: the Redis `PUBLISH` for cache invalidation must happen only after the Postgres transaction successfully commits. Publishing before commit means subscribers attempt to fetch a flag version that doesn't exist yet (the write may still be in-flight or may roll back). Required pattern:
+
+```go
+tx, _ := pool.BeginTx(ctx, pgx.TxOptions{})
+// UPDATE flag_environments ... INSERT INTO audit_log ...
+if err := tx.Commit(ctx); err != nil {
+    return err
+}
+// Only publish after successful commit — never before
+redis.Publish(ctx, "flag_changes", event)
+```
+
+If `PUBLISH` fails after a successful commit, the TTL-based eviction (30 seconds) is the fallback — not a correctness problem.
+
+**Cache warming: lazy by design.** The server does NOT pre-load all flags on startup. The first evaluation for each flag pays the full Postgres latency; subsequent calls hit in-memory cache. This keeps startup time predictable and avoids a write storm on Postgres when multiple instances restart simultaneously. The `readyz` `"cache": "cold"` status communicates this to the load balancer during warm-up.
+
 ### In-memory cache structure
 
 ```go
@@ -716,6 +853,30 @@ type FlagCache struct {
 
 **Eviction**: A background goroutine runs every `ttl/2` and removes expired entries. Lazy eviction on read is also checked (belt and suspenders).
 
+**Size bound**: the cache is capped at `max_entries` (default: 10,000 flag-environment pairs). When the limit is reached, the least-recently-used entry is evicted. Without a bound, servers with many environments and flags could exhaust heap memory over time. For typical deployments (50 flags × 5 environments = 250 entries) this limit is never reached.
+
+**Cache stampede prevention (`singleflight`)**: when an in-memory cache entry expires for a hot flag, many concurrent goroutines may simultaneously attempt to fetch from Redis/Postgres — the thundering herd problem. `golang.org/x/sync/singleflight` deduplicates: only one goroutine executes the lookup, the rest wait and share the result.
+
+```go
+var sf singleflight.Group
+
+func (c *memoryCachedStore) GetFlagConfig(ctx context.Context, envID EnvironmentID, key FlagKey) (*FlagConfig, error) {
+    cacheKey := string(envID) + ":" + string(key)
+    if entry, ok := c.get(cacheKey); ok {
+        return entry, nil
+    }
+    v, err, _ := sf.Do(cacheKey, func() (any, error) {
+        return c.next.GetFlagConfig(ctx, envID, key)
+    })
+    if err != nil {
+        return nil, err
+    }
+    cfg := v.(*FlagConfig)
+    c.set(cacheKey, cfg)
+    return cfg, nil
+}
+```
+
 ### SSE fan-out
 
 ```go
@@ -730,6 +891,41 @@ type SSEHub struct {
 
 Each connected SSE client has its own Go channel backed by a goroutine that writes to the HTTP response. When a change arrives, the hub iterates over all clients and sends the event to each channel. Graceful shutdown drains all client connections.
 
+### SDK Bootstrap Race Condition
+
+The naive SDK startup sequence has an unavoidable race window:
+
+```
+T=0ms:   SDK → POST /evaluate/flags   (snapshot of all flag values)
+T=50ms:  Flag "checkout-v2" changes on server  ← MISSED
+T=100ms: SDK → GET /stream            (starts receiving SSE events)
+```
+
+The change at T=50ms is never delivered: the bulk eval happened before it, and the SSE connection opened after. The SDK has stale state indefinitely.
+
+**Solution: Last-Event-ID + server-side event log**
+
+Each SSE event carries a monotonically increasing integer ID. The server maintains a short-lived event log in Redis (capped list, TTL 30 seconds, keyed by environment). On connect or reconnect, the SDK sends `Last-Event-ID: <id>` and the server replays all events after that ID.
+
+**Corrected startup sequence**:
+```
+1. SDK → GET /stream?last_event_id=0   (open SSE first — server starts buffering)
+2. SDK → POST /evaluate/flags           (bulk eval)
+3. Server replays any events since ID 0 over the already-open SSE connection
+4. SDK applies replayed events on top of the bulk eval snapshot
+```
+
+By opening the SSE connection before the bulk fetch, the SDK guarantees no events fall in the gap.
+
+**Fallback (event log expired)**: If `last_event_id` points to an event older than 30 seconds (or is absent), the server emits a `resync` event instructing the SDK to re-fetch all flags via `POST /evaluate/flags`.
+
+**Event log Redis structure**:
+```
+Key:   sse:events:{environment_id}   (Redis list, capped at 500 entries via LTRIM)
+Value: JSON-encoded SSE event
+TTL:   30 seconds (refreshed on every new event)
+```
+
 ---
 
 ## API Design
@@ -740,6 +936,13 @@ Each connected SSE client has its own Go channel backed by a goroutine that writ
 
 ```
 /api/v1/                          # Versioned API root
+├── setup/
+│   └── POST   /                   # One-shot bootstrap (no auth; 409 if already initialized)
+├── projects/
+│   ├── GET    /                   # List projects in tenant
+│   ├── POST   /                   # Create project (auto-creates default environments)
+│   ├── GET    /:slug              # Get project details
+│   └── PUT    /:slug              # Update project name/slug
 ├── auth/
 │   ├── POST   login              # Email + password → JWT
 │   ├── POST   refresh            # Refresh token → new JWT pair
@@ -883,10 +1086,13 @@ Success response (200 OK):
 
 **Performance note**: Bulk evaluation loads ALL flags for the environment in a single Postgres query (or cache hit), then evaluates each against the provided context. This is O(F × R) where F = number of flags and R = average rules per flag. For typical deployments (50 flags, 5 rules each), this completes in <10ms.
 
-**SDK bootstrap flow**:
-1. SDK starts → `POST /evaluate/flags` with user context → gets all current values
-2. SDK opens SSE connection → receives real-time updates
-3. On SSE event → re-evaluate changed flag locally OR re-fetch single flag
+**Scale consideration**: For environments with > 500 flags, bulk evaluation may take 50–100ms. At that scale, consider fetching only enabled flags (`enabled = true`) or a filtered key set. A `?keys=flag-a,flag-b` filter parameter is in scope for Milestone 3 but not required for MVP.
+
+**SDK bootstrap flow** (race-condition-safe — see [SDK Bootstrap Race Condition](#sdk-bootstrap-race-condition)):
+1. SDK opens SSE connection with `Last-Event-ID: 0` → server starts buffering events
+2. SDK calls `POST /evaluate/flags` → gets all current values
+3. Server replays any events that arrived during step 2 over the open connection
+4. On subsequent SSE events → re-fetch the changed flag via `POST /evaluate/flags/:key`
 
 #### Evaluation reason enum
 
@@ -972,6 +1178,64 @@ Response when degraded (503 Service Unavailable):
 **Auth**: None. Same reasoning as liveness.
 
 **Why two endpoints instead of one?** A single `/health` endpoint conflates two questions. If the process is alive but Postgres is down, we want the orchestrator to keep the process running (don't restart — it might recover) but remove it from the load balancer (don't send traffic). Two endpoints give the operator precise control.
+
+### SSE Event Format
+
+The `/stream` endpoint emits `text/event-stream` responses. Three event types are defined:
+
+#### `flag_change` — a flag's configuration changed
+
+```
+id: 42
+event: flag_change
+data: {"flag_key":"checkout-v2","environment_id":"env_abc123","change":"updated","version":5}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `flag_key` | string | The flag's human-readable key |
+| `environment_id` | UUID | Which environment changed |
+| `change` | enum | `updated` \| `archived` \| `enabled` \| `disabled` |
+| `version` | int | New `flag_environments.version` (for OCC on re-fetch) |
+
+The payload does **not** include the new rule set. Rationale: sending full rule payloads over SSE means every connected SDK receives data it may not need. The SDK re-evaluates the flag by calling `POST /evaluate/flags/:key` after receiving the event.
+
+Exception: `enabled` and `disabled` changes imply a known new value (`false` for disabled, restored for enabled) and can be applied locally without a re-fetch.
+
+#### `resync` — SDK must re-fetch all flags
+
+```
+id: 43
+event: resync
+data: {"reason":"event_log_expired"}
+```
+
+Sent when a reconnecting SDK requests events older than the Redis event log's TTL (30s). The SDK must discard its local cache and re-bootstrap via `POST /evaluate/flags`.
+
+#### `heartbeat` — keepalive
+
+```
+event: heartbeat
+data: {"timestamp":"2024-11-15T03:22:41Z"}
+```
+
+Sent every 30 seconds. SDKs reset their reconnect timer on each heartbeat. If no heartbeat arrives within 90 seconds, the SDK treats the connection as dead and reconnects.
+
+### SSE Reconnection & Backoff
+
+SDKs must implement exponential backoff with jitter to avoid thundering herd on server restarts:
+
+| Parameter | Value |
+|---|---|
+| Initial delay | 1 second |
+| Backoff multiplier | 2× |
+| Max delay | 60 seconds |
+| Jitter | ±20% of current delay |
+| Max reconnect attempts | Unlimited (flag evaluation must keep working) |
+
+On each reconnect, the SDK sends `Last-Event-ID: <last_received_id>` in the HTTP request header. If the server has the events in its Redis log, it replays them. If not, it sends a `resync` event (see above).
+
+**Goroutine model (Go SDK)**: Two goroutines — one owns the SSE connection and reconnect loop, one serves the user-facing `IsEnabled` / `GetVariant` API from a thread-safe local cache. The user-facing goroutine is never blocked by reconnection.
 
 ---
 
@@ -1158,6 +1422,163 @@ Flagstone is NOT going to replace Flipt for teams that already use it. Our marke
 
 ---
 
+## Implementation Conventions
+
+Code-level decisions that apply across the entire codebase. Every contributor follows these so the code stays consistent.
+
+### Error handling
+
+**Wrapping convention**: `fmt.Errorf("package.Operation: %w", err)`. The prefix names the package and operation — errors are self-documenting in logs without needing a stack trace:
+
+```
+storage.GetFlag: sql: no rows in result set
+engine.Evaluate: storage.GetFlag: connection refused
+api.handleEvaluate: engine.Evaluate: storage.GetFlag: context deadline exceeded
+```
+
+**Sentinel errors** for conditions callers need to distinguish with `errors.Is()`:
+
+```go
+var (
+    ErrFlagNotFound        = errors.New("flag not found")
+    ErrFlagArchived        = errors.New("flag archived")
+    ErrEnvironmentNotFound = errors.New("environment not found")
+    ErrVersionConflict     = errors.New("version conflict") // OCC
+)
+```
+
+HTTP handlers map domain errors to status codes via `errors.Is()`. Anything that isn't a known sentinel becomes a 500.
+
+### Dependency injection
+
+**No framework** (Wire, Uber fx, etc.). The dependency graph fits in ~20 lines of `main.go`, assembled by hand with explicit constructors:
+
+```go
+pool     := storage.NewPool(cfg.DatabaseURL)
+pgStore  := storage.NewPostgresStore(pool)
+redStore := storage.NewRedisCachedStore(pgStore, redisClient, cfg.FlagCacheTTL)
+memStore := storage.NewMemoryCachedStore(redStore, cfg.FlagCacheTTL)
+engine   := engine.New(memStore)
+server   := api.NewServer(engine, cfg)
+```
+
+A DI framework adds its own dependency, code generation, and a learning curve without meaningful benefit at this scale. Revisit if the graph exceeds ~40 nodes.
+
+### Decorator pattern for the cache layers
+
+Each cache layer is a decorator wrapping the next. All three implement the same interface:
+
+```go
+type FlagStore interface {
+    GetFlagConfig(ctx context.Context, envID EnvironmentID, key FlagKey) (*FlagConfig, error)
+    ListFlagConfigs(ctx context.Context, envID EnvironmentID) ([]*FlagConfig, error)
+}
+
+// Concrete implementations (innermost → outermost):
+// 1. postgresStore        — source of truth
+// 2. redisCachedStore     — wraps postgresStore, adds Redis cache
+// 3. memoryCachedStore    — wraps redisCachedStore, adds in-process cache
+```
+
+The engine only knows `FlagStore`. Unit tests pass a `fakeFlagStore` returning in-memory fixtures. Integration tests use `postgresStore` directly. Each layer is independently testable.
+
+### Startup retry, not request retry
+
+The DB connection retries with exponential backoff on startup — Postgres takes a few seconds to be ready in Docker. Requests do not retry.
+
+```go
+func connectWithRetry(ctx context.Context, url string) (*pgxpool.Pool, error) {
+    backoff := time.Second
+    for i := range 5 {
+        pool, err := pgxpool.New(ctx, url)
+        if err == nil {
+            return pool, nil
+        }
+        slog.Warn("db not ready, retrying", "attempt", i+1, "backoff", backoff)
+        time.Sleep(backoff)
+        backoff *= 2
+    }
+    return nil, fmt.Errorf("storage: failed to connect after 5 attempts")
+}
+```
+
+Per-request retries are intentionally absent. A failing query has a defined fallback (next cache level → `false`). Retrying adds latency; the fallback is faster and always correct.
+
+### Middleware stack order
+
+The order is load-bearing — a request ID must exist before auth logs it; rate limiting must happen after auth to limit by API key, not by anonymous IP:
+
+```
+panic recovery → request ID → structured log → auth → rate limit → handler
+```
+
+```go
+mux.Handle("POST /api/v1/evaluate/flags/{key}", Chain(
+    handlers.Evaluate,
+    middleware.RecoverPanic,   // outermost: catches everything below
+    middleware.RequestID,      // generates req ID before any logging
+    middleware.Logger(logger), // logs with req ID attached
+    middleware.APIKeyAuth(keyStore),
+    middleware.RateLimit(cfg.EvaluateRateLimit), // limits per authenticated key
+))
+```
+
+`Chain` applies middlewares right-to-left so the first listed wraps outermost.
+
+### SDK configuration: functional options
+
+The SDK is a public API imported by third parties. Functional options let new options be added without breaking existing callers:
+
+```go
+type Option func(*sdkConfig)
+
+func WithCacheTTL(d time.Duration) Option  { return func(c *sdkConfig) { c.cacheTTL = d } }
+func WithLogger(l *slog.Logger) Option     { return func(c *sdkConfig) { c.logger = l } }
+func WithHTTPClient(h *http.Client) Option { return func(c *sdkConfig) { c.httpClient = h } }
+
+func New(serverURL, apiKey string, opts ...Option) *Client
+```
+
+Internal packages use plain config structs — functional options only pay off for public APIs that evolve over time.
+
+### Value types for critical IDs
+
+Prevent the class of bug where `flagKey` and `environmentID` are swapped in a function call — the compiler catches it:
+
+```go
+type FlagKey       string
+type EnvironmentID string
+type TenantID      string
+```
+
+Used in all `FlagStore` and `Engine` interface signatures. Not used inside HTTP handler internals where path values from `r.PathValue()` are immediately converted at the boundary.
+
+### Table-driven tests for the engine
+
+The engine has many cases — operators, tree shapes, rollout edge cases, missing attributes, type coercion. Table-driven tests are mandatory:
+
+```go
+var evaluateTests = []struct {
+    name    string
+    rules   string
+    context map[string]any
+    want    bool
+    reason  string
+}{
+    {"no rules → default",     "[]",   nil,                            false, "DEFAULT"},
+    {"eq match",  `[{"conditions":{"attribute":"plan","op":"eq","value":"premium"},"value":true}]`, map[string]any{"plan":"premium"}, true,  "RULE_MATCH"},
+    {"eq no match",            `...`,  map[string]any{"plan":"free"},  false, "DEFAULT"},
+    {"missing attribute → false", `...`, map[string]any{},            false, "DEFAULT"},
+}
+for _, tt := range evaluateTests {
+    t.Run(tt.name, func(t *testing.T) { ... })
+}
+```
+
+Engine tests are pure unit tests — no DB, no Redis, no HTTP. Everything is in `internal/engine/evaluate_test.go`.
+
+---
+
 ## Deferred Decisions
 
 Honest list of things we know we'll need eventually, but don't implement now:
@@ -1171,7 +1592,7 @@ Honest list of things we know we'll need eventually, but don't implement now:
 | Secrets Manager | When there are 3+ secrets or 2+ developers | ~$0.40/secret/month |
 | Auto Scaling | When one instance is insufficient | Variable |
 | gRPC API | Milestone 3, when multi-language SDKs benefit from Protobuf | Zero (infra) |
-| Rate limiting | Milestone 1 — needed for API security | Zero (in-process) |
+| Rate limiting | Milestone 2 — needed before public deployment | Zero (in-process) |
 | CORS configuration | When dashboard SPA or client-side SDKs exist | Zero |
 | CSRF protection | When dashboard uses cookie-based sessions | Zero |
 | Backups cross-region | When compliance requires it | Variable |
@@ -1179,6 +1600,8 @@ Honest list of things we know we'll need eventually, but don't implement now:
 | Multivariate flags (variants) | Milestone 2 — when boolean on/off is insufficient | Zero (schema + engine change) |
 | Scheduled flags | Milestone 2 — `activate_at`/`deactivate_at` on `flag_environments` + background goroutine | Zero |
 | Flag dependencies | Never — resolve in client code. Complexity doesn't justify the coupling. | N/A |
+| Circuit breaker | Never — the manual fallback chain (Redis → Postgres → in-memory → `false`) already provides graceful degradation without a state machine. Redis client reconnects automatically. | Zero |
+| DI framework (Wire/fx) | Never at this scale — the dependency graph fits in ~20 lines of `main.go`. See [Implementation Conventions](#implementation-conventions). | Zero |
 | OpenFeature Go provider | Milestone 3 — after core is stable | Zero |
 
 The principle: **each infra feature pays its cost only when there's a concrete user or requirement justifying it**. Until then, simple beats "prepared for the future".

@@ -235,8 +235,7 @@ CREATE TABLE flag_environments (
 
     enabled        BOOLEAN      NOT NULL DEFAULT FALSE,    -- master kill switch
     rules          JSONB        NOT NULL DEFAULT '[]'::jsonb,
-    default_value  JSONB,                                  -- override flag default for this env
-    rollout        JSONB,                                  -- e.g. { "percentage": 25, "seed": "..." }
+    default_value  JSONB,                                  -- per-env override of flag.default_value
 
     version        BIGINT       NOT NULL DEFAULT 1,
     created_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),

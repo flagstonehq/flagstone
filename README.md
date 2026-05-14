@@ -351,6 +351,7 @@ Designed to run **free on AWS for 12-24 months** combining free tier + credits.
 ### Milestone 1 — Local MVP (weeks 1-4)
 
 - Database schema and migrations
+- Tenant/project/environment bootstrap flow (`POST /setup`, `POST /projects`)
 - REST API for flag CRUD
 - Rule evaluation engine
 - Basic Go SDK (no cache)
@@ -359,10 +360,10 @@ Designed to run **free on AWS for 12-24 months** combining free tier + credits.
 
 ### Milestone 2 — Real client (weeks 5-8)
 
-- SDK with local cache
-- SSE streaming of changes
+- SDK with local cache + SSE streaming (with Last-Event-ID replay)
 - Dashboard auth (JWT + sessions)
 - Minimal web dashboard (CRUD)
+- Rate limiting
 - Docker + docker-compose
 - Integration tests with testcontainers
 
@@ -372,7 +373,6 @@ Designed to run **free on AWS for 12-24 months** combining free tier + credits.
 - Audit log with DB-enforced immutability
 - OTel metrics and traces
 - Automated deploy to AWS via Terraform
-- Rate limiting
 - Complete documentation
 - OpenFeature provider
 
