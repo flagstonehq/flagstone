@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 var (
@@ -18,19 +19,23 @@ var (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
+	// Production logger: JSON output, no caller info (cheaper at high QPS),
+	// ISO8601 timestamps. Use NewDevelopment() for human-readable local logs.
+	logger, err := zap.NewProduction()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "logger init: %v\n", err)
+		os.Exit(1)
+	}
+	defer logger.Sync() //nolint:errcheck // sync on shutdown is best-effort
 
-	slog.Info("starting flagstone",
-		"version", version,
-		"commit", commit,
-		"date", date,
+	logger.Info("starting flagstone",
+		zap.String("version", version),
+		zap.String("commit", commit),
+		zap.String("date", date),
 	)
 
 	// TODO: Load config from environment / flags
-	// TODO: Initialize database connection pool
+	// TODO: Initialize database connection pool (see DESIGN.md → Connection pool sizing)
 	// TODO: Initialize Redis client
 	// TODO: Initialize rule engine
 	// TODO: Initialize OpenTelemetry provider
@@ -56,25 +61,25 @@ func main() {
 	defer stop()
 
 	go func() {
-		slog.Info("listening", "addr", addr)
+		logger.Info("listening", zap.String("addr", addr))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server error", "err", err)
+			logger.Error("server error", zap.Error(err))
 			os.Exit(1)
 		}
 	}()
 
 	<-ctx.Done()
-	slog.Info("shutting down gracefully...")
+	logger.Info("shutting down gracefully...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("forced shutdown", "err", err)
+		logger.Error("forced shutdown", zap.Error(err))
 		os.Exit(1)
 	}
 
-	slog.Info("server stopped")
+	logger.Info("server stopped")
 }
 
 // envOr returns the value of the environment variable key, or fallback if unset.

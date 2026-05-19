@@ -16,6 +16,7 @@
    - [Evaluation Flow (complete)](#evaluation-flow-complete)
    - [Error Policy](#error-policy-resilience-over-correctness)
    - [Rollout Configuration Spec](#rollout-configuration-spec)
+   - [Eager loading: avoiding N+1 queries](#eager-loading-avoiding-n1-queries)
 5. [Authentication & Authorization](#authentication--authorization)
    - [Onboarding & Bootstrap Flow](#onboarding--bootstrap-flow)
 6. [Caching & Propagation](#caching--propagation)
@@ -28,10 +29,14 @@
 8. [Observability](#observability)
 9. [Infrastructure (AWS)](#infrastructure-aws)
 10. [Cost Strategy](#cost-strategy)
-11. [Competitive Landscape](#competitive-landscape)
-12. [Implementation Conventions](#implementation-conventions)
-13. [Deferred Decisions](#deferred-decisions)
-14. [References](#references)
+11. [Monetization Model](#monetization-model)
+12. [Competitive Landscape](#competitive-landscape)
+13. [Implementation Conventions](#implementation-conventions)
+    - [Logging](#logging)
+    - [Database connection pool sizing](#database-connection-pool-sizing)
+    - [Plan enforcement (tenant quotas)](#plan-enforcement-tenant-quotas)
+14. [Deferred Decisions](#deferred-decisions)
+15. [References](#references)
 
 ---
 
@@ -250,6 +255,7 @@ The first migration (`migrations/000001_initial.up.sql`) creates all core tables
 | `tenants` | Top-level isolation unit | `id`, `slug`, `name` |
 | `users` | Human accounts (dashboard) | `id`, `email` (CITEXT), `password_hash` |
 | `tenant_members` | User-to-tenant membership + role | `user_id`, `tenant_id`, `role` |
+| `sessions` | JWT refresh token storage | `user_id`, `tenant_id`, `refresh_hash`, `expires_at` |
 | `projects` | Grouping of flags within a tenant | `id`, `tenant_id`, `slug`, `name` |
 | `environments` | dev/staging/prod per project | `id`, `project_id`, `slug`, `name` |
 | `api_keys` | Machine auth, scoped to environment | `key_hash`, `key_prefix`, `environment_id`, `revoked_at` |
@@ -424,7 +430,7 @@ A `ConditionNode` is one of four shapes:
 
 **Type coercion rules**: The engine compares as the type of `value` in the rule. If the user context attribute cannot be coerced (e.g., `"abc"` vs numeric `gt`), the condition evaluates to `false` — never errors.
 
-**`segment` operator**: The `value` is a segment key. The engine loads the segment's own condition tree and evaluates it recursively. Circular references (segment A references segment B which references A) are detected by maintaining a visited set — if a cycle is found, the condition evaluates to `false` and a warning is logged.
+**`segment` operator**: The `value` is a segment key. The engine looks up the segment in a **pre-loaded map** passed in by the caller (see [Eager loading: avoiding N+1 queries](#eager-loading-avoiding-n1-queries)) and evaluates its condition tree recursively in-memory. The engine never performs I/O — that is the responsibility of the storage layer. Circular references (segment A → B → A) are detected by maintaining a visited set during traversal; if a cycle is found, the condition evaluates to `false` and a warning is logged.
 
 **`matches` operator**: Uses Go's `regexp.MatchString` (RE2 syntax). The pattern is compiled once and cached. Invalid regex patterns cause the condition to evaluate to `false` + error log (never panic).
 
@@ -488,7 +494,7 @@ Step 4: EVALUATE RULES (in order, first match wins)
   │   └─ Yes → check rollout
   │       ├─ No rollout config? → return { value: rule.value, reason: "RULE_MATCH", rule_index: i }
   │       └─ Has rollout?
-  │           ├─ No user_id in context? → use percentage as probability (non-deterministic)
+  │           ├─ No user_id in context? → rollout treated as NOT matched (skip rule), warning metric
   │           ├─ hash(flag_key + ":" + user_id) % 100 < percentage?
   │           │   ├─ Yes → return { value: rule.value, reason: "RULE_MATCH", rule_index: i }
   │           │   └─ No → continue to next rule (NOT default — next rule gets a chance)
@@ -511,7 +517,11 @@ Step 5: EMIT TELEMETRY (non-blocking, after response)
 // If non-admin is outside the 50%, they fall to default (false).
 ```
 
-**No `user_id` in context for rollout**: If the SDK doesn't send a `user_id` and a rule has a rollout, the engine uses `rand.Intn(100) < percentage` — non-deterministic. This is documented behavior: "for consistent rollouts, always send `user_id`." A warning metric is incremented.
+**No `user_id` in context for rollout**: if the SDK doesn't send a `user_id` and a rule has a rollout, the engine treats the rollout as **not matched** — the rule is skipped and evaluation continues to the next rule (or falls through to default). The metric `engine_warnings_total{type="rollout_without_user_id"}` is incremented and a warning is logged with the flag key.
+
+Why not use `rand.Intn(100)`? It's non-deterministic — the same evaluation would flicker between true/false on consecutive requests, causing visible UI churn (features appearing and disappearing as the user navigates). Returning a deterministic "not in rollout" is worse for the developer's intent (less coverage than they wanted) but better for the end user (no flicker), and the warning metric makes the misconfiguration loud. The SDK MUST send `user_id` for rollouts to take effect; this is the contract.
+
+Why not hash IP + User-Agent as a session-ish fallback? IP changes (mobile networks, VPN), UA changes (browser updates), and this would introduce privacy concerns (storing PII in evaluation context). It's the SDK's job — not the server's — to persist an anonymous session ID (cookie, localStorage) if the app has no logged-in user. A future SDK option (`WithAnonymousID`) can automate this.
 
 ### Error Policy: Resilience over Correctness
 
@@ -610,6 +620,75 @@ When **decreasing** percentage: users are removed from the group. This is expect
 
 This reads: "25% of paid users in LATAM get the feature. All internal users get it regardless."
 
+### Eager loading: avoiding N+1 queries
+
+The engine never performs I/O. All data needed for an evaluation must be loaded by the storage layer **in batch** before the engine runs. This prevents the classic N+1 pattern.
+
+#### Bulk flag evaluation: a single JOIN
+
+For `POST /api/v1/evaluate/flags` (all flags for an environment), one Postgres query returns everything:
+
+```sql
+SELECT f.id, f.key, f.type, f.default_value AS flag_default,
+       fe.enabled, fe.rules, fe.default_value AS env_default, fe.version
+FROM flags f
+JOIN flag_environments fe ON fe.flag_id = f.id
+WHERE fe.environment_id = $1
+  AND f.archived_at IS NULL
+```
+
+One query, regardless of whether there are 5 or 500 flags. The result is then evaluated entirely in memory.
+
+#### Segment resolution: preload the project's segments
+
+Rules can reference segments by key. If the engine were to load segments on-demand during evaluation, a flag with 5 segment references would cause 5 extra queries per evaluation — the N+1 nightmare.
+
+**Solution: preload all segments for the project in one query**, into a `map[SegmentKey]*Segment` passed to the engine as part of the evaluation input.
+
+```sql
+SELECT id, key, rules
+FROM segments
+WHERE project_id = $1 AND archived_at IS NULL
+```
+
+Why load **all** project segments rather than only referenced ones? Two reasons:
+
+1. **Simplicity**: collecting referenced segment keys from JSONB rules requires walking the tree before querying. Loading all is one fewer round of pre-processing.
+2. **Transitive references**: segments can reference other segments (A → B → C). The naive `WHERE key = ANY($keys)` only returns directly-referenced segments, missing transitive ones. A loop with multiple query rounds or a recursive CTE would handle this, but loading the full project is simpler and the data is tiny (typically <100 segments × 1 KB = 100 KB).
+
+If a project ever grows to thousands of segments, we revisit and switch to BFS-based loading of only the referenced subgraph.
+
+#### Cached at the bundle level, not per-flag
+
+The cache key is `env_id` (not `env_id:flag_key`). The cached value is the full evaluation bundle:
+
+```go
+type EnvironmentBundle struct {
+    Flags    []*FlagConfig
+    Segments map[SegmentKey]*Segment
+    LoadedAt time.Time
+}
+```
+
+This way, both single-flag and bulk evaluations share the same cache entry. Cache invalidation purges the entire environment's bundle when any flag or segment in it changes — pessimistic but simple, and the next request reloads everything in one query.
+
+#### Engine interface (pure, no I/O)
+
+```go
+type EvaluateRequest struct {
+    Flag     *FlagConfig
+    Segments map[SegmentKey]*Segment  // preloaded by caller
+    Context  map[string]any            // user attributes
+}
+
+type Engine interface {
+    Evaluate(ctx context.Context, req EvaluateRequest) EvaluateResult
+    EvaluateAll(ctx context.Context, flags []*FlagConfig, segments map[SegmentKey]*Segment, ctxAttrs map[string]any) map[FlagKey]EvaluateResult
+}
+```
+
+The engine is deterministic, pure, and trivially unit-testable: no DB mock needed.
+
 ---
 
 ## Authentication & Authorization
@@ -699,27 +778,29 @@ Authorization is checked in middleware after authentication:
 
 A user can belong to multiple tenants (consultant, agency dev). The JWT specifies which tenant is "active" for this session.
 
-### Session table (planned addition)
+### Session table
 
-The current schema has `users` but no `sessions` table. For the JWT refresh token flow, we need:
+JWT refresh tokens are stored in the `sessions` table (created by migration `000001_init.up.sql`):
 
 ```sql
 CREATE TABLE sessions (
     id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id       UUID         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id       UUID         NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
     tenant_id     UUID         NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    refresh_hash  CHAR(64)     NOT NULL,  -- SHA-256 of refresh token
+    refresh_hash  CHAR(64)     NOT NULL UNIQUE,  -- SHA-256 of refresh token
     user_agent    TEXT,
     ip_address    INET,
     expires_at    TIMESTAMPTZ  NOT NULL,
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX sessions_user_idx ON sessions(user_id);
-CREATE INDEX sessions_cleanup_idx ON sessions(expires_at) WHERE expires_at < NOW();
+CREATE INDEX sessions_user_idx        ON sessions(user_id);
+CREATE INDEX sessions_expires_at_idx  ON sessions(expires_at);
 ```
 
-This will be added in migration `000002_add_sessions.up.sql` when dashboard auth is implemented.
+Why `sessions` lives in the initial migration: the `POST /api/v1/setup` endpoint (Milestone 1) returns an access token + refresh token, so the table must exist from day one. Dashboard auth in general (login/refresh/logout) is also Milestone 1 because flag CRUD endpoints need RBAC-protected JWT auth from the first endpoint that's not API-key-authenticated.
+
+A background goroutine periodically deletes expired sessions: `DELETE FROM sessions WHERE expires_at < NOW()`. The `sessions_expires_at_idx` index makes this efficient.
 
 ### Onboarding & Bootstrap Flow
 
@@ -1113,7 +1194,7 @@ The `context` object is a flat `map[string]any`. Rules reference attributes by k
 - **Maximum key length**: 128 characters
 - **Maximum string value length**: 1024 characters
 - **Allowed value types**: string, number (float64), boolean, array of strings
-- **`user_id`**: not required, but strongly recommended. Without it, rollouts become non-deterministic.
+- **`user_id`**: not required, but mandatory for any flag whose rules use rollout. Without `user_id`, rollouts are treated as not-matched (the rule is skipped); a warning metric is emitted so the misconfiguration surfaces in dashboards.
 - **Reserved keys**: none currently, but keys starting with `_fs_` are reserved for future engine use
 
 ### Health Check Design
@@ -1384,6 +1465,81 @@ Configure in CloudWatch:
 
 ---
 
+## Monetization Model
+
+> Strategy, pricing, and execution phases live in **[BUSINESS.md](./BUSINESS.md)**. This section covers the architectural implications.
+
+Flagstone is **dual-distribution**: the same codebase runs as both a fully open-source self-hosted server and as our managed Cloud offering. There is **no fork**, no enterprise-only feature flags, no closed-source addons. The only difference between the two is operational and configuration.
+
+### Self-hosted (free, MIT license)
+
+The user runs `docker compose up` (or Terraform → AWS / Kubernetes / their own infra) and gets the full server.
+
+- All features available, no artificial limits
+- All API endpoints, all SDK functionality
+- All security and observability features
+- MIT license: fork it, modify it, embed it
+- No phone-home, no telemetry, no license check
+
+Configuration default: `FLAGSTONE_DEFAULT_PLAN=enterprise` — new tenants get unlimited everything. The `tenants.plan` column exists but quotas resolve to "no limit" for the `enterprise` plan.
+
+Suitable for: solo devs, internal tooling teams, companies with strict data residency requirements, anyone who wants full control.
+
+### Flagstone Cloud (managed by us, paid tiers)
+
+We operate a multi-tenant deployment of the same code. Customers create an account at `cloud.flagstone.dev`, never touch a server, never run a migration. Bring credit card.
+
+Configuration: `FLAGSTONE_DEFAULT_PLAN=free` — new tenants land on the free plan and explicitly upgrade.
+
+**Pricing tiers** (illustrative — final numbers set at launch):
+
+| Tier | Price | What you get |
+|---|---|---|
+| **Free** | $0 | 1 project, 10 flags, 100k evals/month, community support |
+| **Starter** | $19/mo | 5 projects, 100 flags, 5M evals/month, email support |
+| **Pro** | $79/mo | Unlimited projects/flags, 50M evals/month, priority support, webhooks |
+| **Enterprise** | Custom | SSO, SLA 99.9%, dedicated support, on-prem option |
+
+Plan limits are enforced at the storage layer (see [Plan enforcement](#plan-enforcement-tenant-quotas)). Billing integration via Stripe with subscription webhooks updating `tenants.plan`.
+
+### Why this model works
+
+**The same codebase serves both.** This is the GitLab / Sentry / Plausible / Cal.com model — proven to work for OSS infrastructure tools.
+
+| Concern | Why it's fine |
+|---|---|
+| "Won't self-hosters cannibalize Cloud customers?" | Different audience. Self-hosters spend engineering time; Cloud customers spend money. Most teams pick the one that matches their constraint (time vs money). |
+| "What's the moat?" | Operating a reliable SaaS is non-trivial: monitoring, backups, on-call, security patches, SLAs. We charge for that operational expertise, not the bits. |
+| "Why open source the core?" | Trust + adoption. Feature flags are critical infrastructure. Companies are wary of vendor lock-in. Open core eliminates that concern and 10×s the addressable audience. |
+| "Will OSS slow down Cloud development?" | No — the same features ship to both. Cloud only adds: Stripe integration, multi-tenant operational tooling (per-tenant metrics dashboards, billing), and SSO/SAML (which can be a paid plugin even in self-hosted, optional). |
+
+### What is NOT closed-source
+
+Everything the docs describe is in the open repository:
+- Rule engine, evaluation algorithm, consistent hashing
+- All SDKs
+- Database schema, migrations
+- OpenTelemetry integration
+- RBAC, JWT, API key auth
+- The dashboard web UI
+- Terraform modules
+
+### What IS closed-source (Cloud-only operational code)
+
+A small `cmd/flagstone-cloud/` overlay (not in the OSS repo) contains:
+- Stripe webhooks → plan updates
+- Cloud-specific admin endpoints (cross-tenant search, support tools)
+- Billing email templates
+- Onboarding flows for the marketing site
+
+These are not feature flags features — they're SaaS operations. Self-hosters don't need them.
+
+### Migration path: self-hosted → Cloud (or back)
+
+Both deployments use the same schema. Migration is a `pg_dump` from one and `pg_restore` to the other. This is a real selling point: customers aren't locked in. They can prototype self-hosted and move to Cloud when they scale, or vice versa.
+
+---
+
 ## Competitive Landscape
 
 ### Direct competitors
@@ -1425,6 +1581,59 @@ Flagstone is NOT going to replace Flipt for teams that already use it. Our marke
 ## Implementation Conventions
 
 Code-level decisions that apply across the entire codebase. Every contributor follows these so the code stays consistent.
+
+### Logging
+
+**Library: `go.uber.org/zap`** (not stdlib `log/slog`). Reasoning: every flag evaluation may log warnings or errors, and at high QPS the per-call allocation cost of `slog` adds up. Zap's typed-field API (`zap.String`, `zap.Int`) avoids interface boxing and is measurably faster. For a feature-flag server where logging happens in the hot path, this matters.
+
+Use the **non-sugared** logger (`*zap.Logger`, not `*zap.SugaredLogger`) — sugaring trades performance for ergonomics, exactly the opposite of why we chose zap.
+
+#### Levels
+
+| Level | When to use | Example |
+|---|---|---|
+| `Debug` | Per-evaluation traces, dropped in production by default | `"rule matched", zap.Int("rule_index", 2)` |
+| `Info` | Lifecycle events, mutations | `"flag created", zap.String("flag_key", k)` |
+| `Warn` | Recoverable misconfigurations | `"rollout without user_id"` |
+| `Error` | Operations that failed but didn't crash | `"redis publish failed, falling back to TTL"` |
+| `Fatal` | Startup failures only | `"cannot connect to database"` (uses `os.Exit(1)`) |
+
+Never use `Panic` — panic recovery middleware exists for unexpected crashes, not for things we should log.
+
+#### Mandatory structured fields
+
+Every log line in a request-handling code path MUST include (via context):
+
+```go
+logger.Info("flag updated",
+    zap.String("request_id", reqID),
+    zap.String("tenant_id", tenantID.String()),
+    zap.String("user_id", userID.String()),
+    zap.String("flag_key", string(flagKey)),
+)
+```
+
+The middleware injects a request-scoped logger into the context. Handlers retrieve it via `log.FromContext(ctx)`. No global logger inside handlers — that loses correlation.
+
+#### PII handling in logs
+
+- **Never log full emails.** Log the domain only (`@company.com`) or a hash if needed for correlation.
+- **Never log password fields.** Even in error paths.
+- **Never log raw user context attributes** in production — they may contain PII the customer doesn't want in our logs. Log only the keys that matched (`zap.Strings("matched_attributes", []string{"country", "plan"})`) and counts.
+- **API keys**: only the key prefix (`fs_live_a3b9`), never the full key.
+- **JWT tokens**: never log, even truncated.
+
+In development (`FLAGSTONE_ENV=development`), debug-level logging may include more detail. In production, the PII rules above are non-negotiable.
+
+#### Sampling at high QPS
+
+At >1k evaluations/sec, even Info-level logging at one log per eval becomes noisy. Zap's built-in sampler keeps the first N logs per second per level and drops the rest:
+
+```go
+core := zapcore.NewSamplerWithOptions(baseCore, time.Second, 100, 100)
+```
+
+This is enabled by default in production config. Errors and warnings are always logged in full — only Info/Debug are sampled.
 
 ### Error handling
 
@@ -1482,6 +1691,130 @@ type FlagStore interface {
 
 The engine only knows `FlagStore`. Unit tests pass a `fakeFlagStore` returning in-memory fixtures. Integration tests use `postgresStore` directly. Each layer is independently testable.
 
+### Database connection pool sizing
+
+`pgxpool.New` defaults to **`max(4, GOMAXPROCS) = ~4-8 connections`** which is far too low for a feature-flag server doing hundreds of evaluations per second. The pool needs explicit sizing.
+
+#### Sizing formula
+
+```
+MaxConns_per_instance = min(
+    RDS_max_connections × 0.8 / N_instances,
+    target_qps × p99_query_seconds × safety_factor
+)
+```
+
+Concrete numbers for the default AWS setup (`db.t3.micro`, RDS `max_connections = 87`, 1 app instance):
+
+| Variable | Value | Source |
+|---|---|---|
+| RDS `max_connections` | 87 | `db.t3.micro` formula: `LEAST({DBInstanceClassMemory/9531392}, 5000)` |
+| Reserved for other clients | 20% (~17) | Migrations, admin, monitoring |
+| Available for app | 70 | 87 − 17 |
+| Target QPS per instance | 1000 | Modest target |
+| p99 query time | 5 ms | From SLO |
+| Safety factor | 2× | Bursts, retries |
+| Calculated max | 10 | 1000 × 0.005 × 2 |
+| **Configured `MaxConns`** | **25** | Headroom above calculated, well below RDS limit |
+| `MinConns` | 5 | Warm pool, avoids cold-connect on startup |
+
+#### Configuration
+
+```go
+poolCfg, _ := pgxpool.ParseConfig(cfg.DatabaseURL)
+poolCfg.MaxConns        = 25
+poolCfg.MinConns        = 5
+poolCfg.MaxConnLifetime = 1 * time.Hour    // recycle to pick up RDS failovers
+poolCfg.MaxConnIdleTime = 5 * time.Minute  // release idle conns
+poolCfg.HealthCheckPeriod = 30 * time.Second
+pool, _ := pgxpool.NewWithConfig(ctx, poolCfg)
+```
+
+These values live in `config.go` as env vars (`DB_MAX_CONNS`, `DB_MIN_CONNS`, etc.) with the above as defaults.
+
+#### Pool exhaustion monitoring
+
+Expose `pool.Stat()` metrics to Prometheus:
+
+```go
+flagstone_db_pool_acquired_connections   // currently checked out
+flagstone_db_pool_idle_connections       // available in pool
+flagstone_db_pool_total_connections      // total open
+flagstone_db_pool_acquire_wait_seconds   // histogram of how long Acquire() blocked
+```
+
+If `acquire_wait_seconds` p99 exceeds 10ms, the pool is undersized for the workload.
+
+### Plan enforcement (tenant quotas)
+
+The `tenants.plan` column already exists with check constraint `IN ('free', 'team', 'enterprise')` — but no code reads it. Plan enforcement is what turns this into a real SaaS-capable system.
+
+#### Plan limits
+
+| Resource | `free` | `team` | `enterprise` |
+|---|---|---|---|
+| Projects | 1 | 5 | unlimited |
+| Flags per project | 10 | 100 | unlimited |
+| Environments per project | 3 (the defaults) | 5 | unlimited |
+| Segments per project | 5 | 50 | unlimited |
+| API keys per environment | 2 | 10 | unlimited |
+| Team members | 1 | 10 | unlimited |
+| Evaluations per month | 100,000 | 5,000,000 | contractual |
+| SSE concurrent connections per env | 10 | 100 | unlimited |
+| Audit log retention | 7 days | 90 days | 2 years |
+| Webhooks | - | 3 per project | unlimited |
+| SSO (SAML/OIDC) | - | - | Yes |
+| SLA | none | none | 99.9% |
+
+Limits are stored as a hardcoded `map[string]PlanLimits` keyed by plan name. They live in `internal/auth/plans.go` so they're easy to find and adjust without a migration.
+
+#### Enforcement layer
+
+Plan limits are enforced in the **storage layer**, not the handlers. Reason: any code path that creates a flag/segment/key must enforce, and centralizing it prevents bypasses.
+
+```go
+func (s *flagStore) Create(ctx context.Context, f *Flag) error {
+    plan := plans.For(ctx.Tenant())
+    count, _ := s.countFlags(ctx, f.ProjectID)
+    if count >= plan.MaxFlagsPerProject {
+        return ErrPlanLimitExceeded{
+            Resource: "flags",
+            Limit:    plan.MaxFlagsPerProject,
+            Plan:     plan.Name,
+        }
+    }
+    // ... INSERT
+}
+```
+
+#### HTTP response
+
+`ErrPlanLimitExceeded` maps to **`402 Payment Required`** (not 403). The body includes the plan info so the client can prompt the user to upgrade:
+
+```json
+{
+  "error": {
+    "code": "PLAN_LIMIT_EXCEEDED",
+    "message": "Free plan is limited to 10 flags per project. Upgrade to Team for up to 100.",
+    "details": {
+      "resource": "flags",
+      "current": 10,
+      "limit": 10,
+      "plan": "free",
+      "upgrade_url": "https://flagstone.dev/pricing"
+    }
+  }
+}
+```
+
+Why 402 and not 403? 402 specifically signals "this is a paid-tier restriction, not a permissions issue" — the user has the right role, they just don't have the right plan.
+
+#### Self-hosted: plans default to enterprise
+
+Self-hosted deployments don't have plan restrictions by default. The env var `FLAGSTONE_DEFAULT_PLAN=enterprise` (default in self-hosted builds) makes all tenants unlimited. The hosted Cloud deployment sets `FLAGSTONE_DEFAULT_PLAN=free` so new tenants get the free tier and upgrade explicitly.
+
+This is the only difference between self-hosted and Cloud builds — same code, one env var.
+
 ### Startup retry, not request retry
 
 The DB connection retries with exponential backoff on startup — Postgres takes a few seconds to be ready in Docker. Requests do not retry.
@@ -1533,7 +1866,7 @@ The SDK is a public API imported by third parties. Functional options let new op
 type Option func(*sdkConfig)
 
 func WithCacheTTL(d time.Duration) Option  { return func(c *sdkConfig) { c.cacheTTL = d } }
-func WithLogger(l *slog.Logger) Option     { return func(c *sdkConfig) { c.logger = l } }
+func WithLogger(l *zap.Logger) Option      { return func(c *sdkConfig) { c.logger = l } }
 func WithHTTPClient(h *http.Client) Option { return func(c *sdkConfig) { c.httpClient = h } }
 
 func New(serverURL, apiKey string, opts ...Option) *Client

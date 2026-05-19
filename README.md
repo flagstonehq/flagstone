@@ -350,31 +350,44 @@ Designed to run **free on AWS for 12-24 months** combining free tier + credits.
 
 ### Milestone 1 — Local MVP (weeks 1-4)
 
-- Database schema and migrations
+Goal: a running server with secure auth, tenant-scoped flag CRUD, and rule evaluation.
+
+- Database schema and migrations (all core tables, including `sessions`)
 - Tenant/project/environment bootstrap flow (`POST /setup`, `POST /projects`)
-- REST API for flag CRUD
+- Dashboard auth: JWT + refresh tokens + bcrypt password hashing
+- API key authentication for SDKs
+- RBAC middleware (owner/admin/member/viewer)
+- Tenant-scoped queries in storage layer (every query joins on `tenant_id`)
+- REST API for flag CRUD, protected by JWT + RBAC
+- Audit log writes from all mutation endpoints (table + trigger already in migration)
 - Rule evaluation engine
 - Basic Go SDK (no cache)
-- API key authentication
 - Unit tests
 
 ### Milestone 2 — Real client (weeks 5-8)
 
-- SDK with local cache + SSE streaming (with Last-Event-ID replay)
-- Dashboard auth (JWT + sessions)
-- Minimal web dashboard (CRUD)
-- Rate limiting
+Goal: a production-ready client experience with streaming, caching, and a usable web UI.
+
+- SDK with local cache + SSE streaming (with `Last-Event-ID` replay)
+- Minimal web dashboard (CRUD on flags / segments / environments)
+- Rate limiting (in-process token bucket)
+- HTTPS / TLS termination (Caddy or ALB)
+- CORS configuration
+- Security headers (CSP, HSTS, X-Frame-Options)
 - Docker + docker-compose
 - Integration tests with testcontainers
 
 ### Milestone 3 — Production ready (weeks 9-14)
 
-- Multi-tenancy
-- Audit log with DB-enforced immutability
-- OTel metrics and traces
+Goal: differentiation features and operations.
+
+- OpenTelemetry traces + metrics on every evaluation (the headline differentiator)
+- Pre-configured Grafana dashboard
 - Automated deploy to AWS via Terraform
+- Multi-tenant management UI (tenant switching, member invites, role changes)
+- OpenFeature Go provider
 - Complete documentation
-- OpenFeature provider
+- API key expiration enforcement
 
 ### Milestone 4 — Community (weeks 15-24)
 
@@ -516,6 +529,7 @@ $(terraform output -raw ssh_command)
 
 - **[DESIGN.md](./DESIGN.md)** — Architectural decisions: database design, rule engine, caching, infrastructure, costs.
 - **[SECURITY.md](./SECURITY.md)** — Authentication model, authorization (RBAC), API key handling, threat model, compliance considerations.
+- **[BUSINESS.md](./BUSINESS.md)** — Distribution model (OSS + Cloud), pricing strategy, revenue expectations, execution phases.
 - **[migrations/](./migrations/)** — Complete SQL database schema.
 - **[deploy/terraform/](./deploy/terraform/)** — AWS infrastructure as code.
 

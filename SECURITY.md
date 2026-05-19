@@ -162,6 +162,92 @@ Response:
 
 **Token rotation**: every refresh invalidates the old refresh token and issues a new one. If an attacker steals a refresh token and the legitimate user also refreshes, one of them will get an "invalid token" error — signaling the compromise.
 
+#### Email verification
+
+When a new user signs up (or changes their email), the server issues a verification token and emails them a link. The user remains in an unverified state — `email_verified_at IS NULL` — until they click it. Unverified users can log in but cannot create flags or invite members.
+
+```
+POST /api/v1/auth/signup
+{ "email": "...", "password": "..." }
+
+Server:
+  1. Validate email + password
+  2. Create user (email_verified_at = NULL)
+  3. Generate token (32 bytes, base62)
+  4. Insert SHA-256(token) into email_verification_tokens (24h TTL)
+  5. Send email: https://flagstone.dev/verify?token=<raw_token>
+  6. Audit log: auth.signup
+
+User clicks link → GET /api/v1/auth/verify?token=<raw>:
+  1. SHA-256(token) → lookup in email_verification_tokens
+  2. Check not expired
+  3. UPDATE users SET email_verified_at = NOW() WHERE id = $1
+  4. DELETE FROM email_verification_tokens WHERE id = $1
+  5. Audit log: auth.email_verified
+```
+
+Token TTL is 24 hours. A new verification token can be requested via `POST /api/v1/auth/resend-verification` (rate-limited to 3/hour per user).
+
+#### Password reset
+
+A self-service flow for users who forgot their password. The endpoint always returns 200 — even if the email doesn't exist — to prevent enumeration:
+
+```
+POST /api/v1/auth/forgot-password
+{ "email": "..." }
+
+Server:
+  1. Look up user by email (CITEXT)
+  2. If found: generate token, store SHA-256(token) in password_reset_tokens (1h TTL)
+  3. If found: send email with reset link
+  4. If NOT found: do nothing (but still wait ~bcrypt-time to prevent timing oracle)
+  5. Always respond 200 with "if the email exists, a reset link has been sent"
+
+POST /api/v1/auth/reset-password
+{ "token": "<raw>", "new_password": "..." }
+
+Server:
+  1. SHA-256(token) → lookup in password_reset_tokens
+  2. Check not expired
+  3. UPDATE users SET password_hash = bcrypt(new_password)
+  4. DELETE FROM password_reset_tokens WHERE user_id = $1   -- invalidate ALL reset tokens
+  5. DELETE FROM sessions WHERE user_id = $1                 -- force re-login on all devices
+  6. Audit log: auth.password_reset
+```
+
+**Why delete all reset tokens after use**: if an attacker stole a token alongside the legitimate user's, this prevents the second use.
+
+**Why delete all sessions after reset**: a compromised password may have leaked active sessions. Forcing re-login is the safe default.
+
+#### Tenant invitations
+
+An admin invites someone by email to join their tenant with a specific role:
+
+```
+POST /api/v1/tenants/:tenant_id/invitations
+Authorization: Bearer <admin_jwt>
+{ "email": "...", "role": "member" }
+
+Server:
+  1. Verify caller is admin or owner in this tenant
+  2. Validate role (cannot invite as owner — only existing owner can transfer)
+  3. Generate token, store SHA-256(token) in tenant_invitations (7d TTL)
+  4. Send email with invite link
+  5. Audit log: tenant.invite_sent
+
+User clicks link → POST /api/v1/invitations/:token/accept:
+  1. SHA-256(token) → lookup
+  2. Check expires_at and accepted_at IS NULL
+  3. If invitee has account with matching email:
+     - INSERT INTO tenant_members (...) on conflict do nothing
+     - UPDATE tenant_invitations SET accepted_at = NOW()
+  4. If invitee has no account:
+     - Redirect to signup; the invitation gets auto-accepted after they verify their email
+  5. Audit log: tenant.invite_accepted
+```
+
+Inviting as `owner` is never allowed via this flow — ownership transfer requires a separate, explicit `POST /api/v1/tenants/:id/transfer-ownership` endpoint with confirmation.
+
 #### Logout
 
 ```
@@ -552,6 +638,91 @@ Internet
 3. Review CloudWatch logs for unusual request patterns
 4. If confirmed: revoke all sessions for the user, reset password, revoke API keys
 5. Document findings for post-mortem
+
+### Database corruption / loss — restore runbook
+
+The 3 AM scenario. Practice this in staging at least once before relying on it.
+
+#### Decision: snapshot vs Point-In-Time Recovery (PITR)
+
+| Situation | Use |
+|---|---|
+| Logical corruption from a bad migration / app bug | **PITR** to seconds before the bad write |
+| Total instance loss (hardware, region issue) | Latest **automated snapshot** (RPO ≤ 24h) |
+| Manual error needs a specific snapshot | Named snapshot taken before the operation |
+| Audit log shows a single bad mutation | Manual `INSERT` of corrected row + audit entry — never restore for a 1-row issue |
+
+RDS automated backups retain 7 days by default. PITR works to any second within that window.
+
+#### Snapshot restore — 5 minute version
+
+```bash
+# 1. Identify the snapshot
+aws rds describe-db-snapshots \
+    --db-instance-identifier flagstone-prod \
+    --query 'DBSnapshots[*].[DBSnapshotIdentifier,SnapshotCreateTime,Status]' \
+    --output table
+
+# 2. Restore to a NEW instance (never overwrite the broken one until verified)
+aws rds restore-db-instance-from-db-snapshot \
+    --db-instance-identifier flagstone-prod-restore \
+    --db-snapshot-identifier <snapshot-id> \
+    --db-subnet-group-name flagstone-db-subnets \
+    --vpc-security-group-ids <db-sg-id>
+
+# 3. Wait for it to come up (~15 min for db.t3.micro)
+aws rds wait db-instance-available --db-instance-identifier flagstone-prod-restore
+
+# 4. Verify integrity (see "Post-restore verification" below)
+
+# 5. Promote: update app config to new endpoint, restart app instances
+#    (Terraform: update `db_instance_id`, terraform apply)
+
+# 6. Once verified in production, delete the old broken instance
+```
+
+#### PITR — for logical corruption with known bad time
+
+```bash
+aws rds restore-db-instance-to-point-in-time \
+    --source-db-instance-identifier flagstone-prod \
+    --target-db-instance-identifier flagstone-prod-restore \
+    --restore-time 2024-11-15T14:32:00Z \
+    --db-subnet-group-name flagstone-db-subnets
+```
+
+#### Post-restore verification
+
+The audit log immutability triggers MUST be re-verified after any restore — they're part of the schema and should come back automatically, but a corrupted backup might be missing them.
+
+```sql
+-- 1. Trigger exists?
+SELECT tgname FROM pg_trigger WHERE tgname = 'audit_log_immutable';
+-- Expected: 1 row
+
+-- 2. Trigger actually fires?
+BEGIN;
+INSERT INTO audit_log (tenant_id, action, resource_type) VALUES (gen_random_uuid(), 'test', 'test');
+UPDATE audit_log SET action = 'modified' WHERE action = 'test';
+-- Expected: ERROR: audit_log is append-only
+ROLLBACK;
+
+-- 3. flag_environments version trigger?
+SELECT tgname FROM pg_trigger WHERE tgname = 'flag_environments_auto_version';
+
+-- 4. Spot-check row counts vs pre-incident
+SELECT 'tenants' AS t, count(*) FROM tenants
+UNION ALL SELECT 'users', count(*) FROM users
+UNION ALL SELECT 'flags', count(*) FROM flags
+UNION ALL SELECT 'audit_log', count(*) FROM audit_log;
+```
+
+#### After restoration
+
+- Force re-login for all users: `DELETE FROM sessions;` (refresh tokens from before the incident may no longer be valid)
+- Post-mortem with timeline, root cause, and prevention measures
+- If the cause was a bad migration, add a regression test
+- Consider increasing backup retention from 7 to 14 days if the issue went undetected longer than expected
 
 ---
 

@@ -87,6 +87,23 @@ CREATE TABLE tenant_members (
 CREATE INDEX tenant_members_user_idx ON tenant_members(user_id);
 
 
+-- Sessions: refresh token storage for dashboard JWT auth.
+-- We store SHA-256(refresh_token), never the raw token. Every refresh rotates
+-- the row (delete + insert) to detect refresh token theft.
+CREATE TABLE sessions (
+    id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       UUID         NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
+    tenant_id     UUID         NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    refresh_hash  CHAR(64)     NOT NULL UNIQUE,           -- SHA-256 of refresh token
+    user_agent    TEXT,
+    ip_address    INET,
+    expires_at    TIMESTAMPTZ  NOT NULL,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX sessions_user_idx        ON sessions(user_id);
+CREATE INDEX sessions_expires_at_idx  ON sessions(expires_at);   -- for background cleanup
+
+
 -- =============================================================================
 -- Project & environment hierarchy
 -- =============================================================================
