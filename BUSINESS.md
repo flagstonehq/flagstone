@@ -215,14 +215,35 @@ If MRR is <$10k/month and growth has flattened:
 
 ## Execution Phases
 
+### What each milestone unlocks (use-case timeline)
+
+The roadmap milestones don't just produce features — they unlock specific use cases for you. Knowing this lets you start *using* Flagstone yourself long before you'd ever ship it to a paying client.
+
+| Milestone | Done at | What you can do |
+|---|---|---|
+| **M1** | ~Week 4 | Self-host an instance for **your own personal projects**. CRUD via API + Go SDK. No web UI yet. Perfect for: the Discord bot example, side projects, internal tools. |
+| **M2** | ~Week 8 | Self-host for **friends and trusted users**. Web dashboard works, SDK has cache + SSE. Stable enough to recommend to people you know personally. |
+| **M3** | ~Week 14 | Self-host for **the OSS public release**. OTel native, full security hardening, Terraform deploy. Strangers on the internet can deploy it safely. |
+| **Phase 2** | Month 6-9 | Cloud **private beta** — you host it for ~10 early users who asked. Free in exchange for feedback. NOT for paying customers yet. |
+| **Phase 3** | Month 9-12 | Cloud **public launch** — anyone can sign up at `cloud.flagstone.dev` and pay. This is when "clients" becomes a real word. |
+
+The key insight: **you can use Flagstone for your own stuff after Week 4, even if Cloud doesn't exist for another 8+ months.** The dogfood loop starts immediately.
+
+> **Terminology note**: "Flagstone Cloud" (capitalized, the product) refers to the future managed SaaS at `cloud.flagstone.dev` that *you* will operate for paying customers — available Phase 3 (~month 9-12).
+>
+> "Self-hosting Flagstone on AWS" (or any other infra) means running the OSS code in your own AWS account. Even though it physically runs in AWS's cloud, it's not "Flagstone Cloud" the product. It's available from Week 4 onward via the `deploy/terraform/` modules.
+>
+> When your Discord bot (or any deployed app) needs to call Flagstone, the server has to be reachable from wherever the bot runs. For an AWS-hosted bot, the simplest path is to deploy Flagstone in the same AWS VPC — `terraform apply` from `deploy/terraform/` gives you exactly this. Total cost during the free tier: $0.
+
 ### Phase 1 (Months 1-6): Build the OSS — Cloud is vaporware
 
 - Implement Milestones 1 + 2 from the [README roadmap](./README.md#roadmap)
+- **You self-host your own Flagstone instance** from week 4 onward and use it on your other projects (this is how you find bugs early)
 - Public GitHub repo with good README
 - One technical blog post per month about the implementation
 - Active responses to early GitHub issues
 
-**Do not launch Cloud during this phase.** A broken Cloud during early reputation-building kills the whole thing.
+**Do not launch Cloud during this phase.** A broken Cloud during early reputation-building kills the whole thing. But **do** run your own personal instance — that's how you find the bugs before public users do.
 
 ### Phase 2 (Months 6-9): Cloud Private Beta
 
@@ -230,6 +251,7 @@ If MRR is <$10k/month and growth has flattened:
 - Invite 5-10 self-hosters who asked for managed: "I'll host it for you free for 3 months in exchange for feedback"
 - Iterate on the onboarding flow until first-flag-evaluated takes < 5 minutes
 - Run Cloud in production for 90 days without paid customers to shake out the operational bugs
+- **You can offer free Cloud accounts to friends and personal projects** to expand the test population — explicitly framed as "free beta", not "production-ready service"
 
 ### Phase 3 (Months 9-12): Public Launch
 
@@ -237,6 +259,7 @@ If MRR is <$10k/month and growth has flattened:
 - Public pricing on the website
 - Self-serve signup
 - Hobby + Team tiers live, Pro available via email request, Enterprise via "contact us"
+- **Now you can take paying clients** — the SLA, support commitments, and operational quality have been validated by 6 months of private beta
 
 ### Phase 4 (Year 2): Growth
 
@@ -244,6 +267,22 @@ If MRR is <$10k/month and growth has flattened:
 - SDK in additional languages (TypeScript, Python — see [README roadmap](./README.md#roadmap))
 - OpenFeature provider (CNCF standard) — a passive distribution channel
 - First Enterprise sales call (probably inbound from a self-hoster)
+
+### Honest framing of "personal projects" vs "paying clients"
+
+These are very different use cases with very different risk profiles:
+
+| Use case | When safe to do | Why |
+|---|---|---|
+| **Your own side projects (your code, your data)** | After M1 (~week 4) | You bear the risk. If it breaks, you fix it. |
+| **Friends' projects (their code, your hosting)** | After M2 (~week 8) | Web UI makes them self-sufficient; bugs are embarrassing but not catastrophic |
+| **OSS users self-hosting (their code, their hosting)** | After M3 (~week 14) | They take operational risk; you just need the code to be correct |
+| **Free Cloud beta users** | After Phase 2 starts (~month 6) | You take operational risk but no SLA promised |
+| **Paying clients on Cloud** | After Phase 3 launch (~month 9-12) | You take operational risk AND SLA — must be ready |
+
+**The trap to avoid**: charging clients before Phase 3. Once someone pays $9 for Hobby tier, they have legitimate expectations of uptime, support, and feature stability. Setting those expectations before you can meet them burns reputation that's hard to rebuild.
+
+The corollary: **start using Flagstone yourself as soon as possible** (week 4). The earlier you eat your own dog food, the more bugs you catch before paying customers do.
 
 ---
 

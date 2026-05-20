@@ -193,8 +193,11 @@ The [`diagrams/`](./diagrams/) folder contains a full architecture canvas export
 | Streaming | **Server-Sent Events** | Simpler than WebSockets, sufficient for unidirectional push |
 | Storage | **PostgreSQL 16+** | ACID, JSONB for complex rules, ubiquitous |
 | Cache | **Redis 7+** | Distributed cache + pub/sub for multi-instance coordination |
+| Logging | **zap** (`go.uber.org/zap`) | High-performance structured logging in the eval hot path |
 | Observability | **OpenTelemetry** | Standardized traces + metrics + logs |
-| Containers | **Docker** | Deploy anywhere |
+| Web dashboard | **Next.js 15 + TypeScript** | Largest AI training-data corpus → best AI-assisted development |
+| UI components | **shadcn/ui + Tailwind CSS** | Designer-quality components without being a designer |
+| Containers | **Docker** (split: API + Web) | Independent build/scale, single `docker-compose.yml` for self-host |
 | IaC | **Terraform** | Reproducible, versioned infrastructure |
 | Cloud | **AWS** | Generous free tier + learning value |
 | CI/CD | **GitHub Actions** | Community standard, free for OSS |
@@ -369,13 +372,15 @@ Goal: a running server with secure auth, tenant-scoped flag CRUD, and rule evalu
 Goal: a production-ready client experience with streaming, caching, and a usable web UI.
 
 - SDK with local cache + SSE streaming (with `Last-Event-ID` replay)
-- Minimal web dashboard (CRUD on flags / segments / environments)
+- Web dashboard in `web/` — **Next.js 15 + TypeScript + Tailwind + shadcn/ui** (see [DESIGN.md](./DESIGN.md#why-nextjs--shadcnui-for-the-web-dashboard))
+- Visual rule builder + inline "Try it" evaluation panel
+- Split container images: `Dockerfile.api` (Go, ~25MB) + `web/Dockerfile` (Next.js, ~120MB)
+- `docker-compose.yml` for one-command self-host (api + web + postgres + redis)
 - Rate limiting (in-process token bucket)
 - HTTPS / TLS termination (Caddy or ALB)
 - CORS configuration
 - Security headers (CSP, HSTS, X-Frame-Options)
-- Docker + docker-compose
-- Integration tests with testcontainers
+- Integration tests with testcontainers + Playwright E2E for the dashboard
 
 ### Milestone 3 — Production ready (weeks 9-14)
 
@@ -402,30 +407,41 @@ Goal: differentiation features and operations.
 ```
 flagstone/
 ├── cmd/
-│   └── flagstone/          # Server entry point
+│   └── flagstone/          # Server entry point (Go binary)
 ├── internal/
 │   ├── api/                # HTTP handlers and routing
-│   ├── auth/               # API keys, JWT, sessions, RBAC
+│   ├── auth/               # API keys, JWT, sessions, RBAC, plan enforcement
 │   ├── config/             # Configuration loading
-│   ├── engine/             # Rule evaluation engine
-│   ├── storage/            # Persistence layer (Postgres, Redis)
+│   ├── engine/             # Rule evaluation engine (pure, no I/O)
+│   ├── storage/            # Persistence layer (Postgres + decorators for Redis & in-memory)
 │   ├── streaming/          # Server-Sent Events
 │   └── telemetry/          # OpenTelemetry setup
 ├── pkg/
 │   └── sdk/                # Go SDK (importable by third parties)
-├── web/                    # Dashboard web (React) — future
+├── web/                    # Next.js 15 dashboard (TypeScript + Tailwind + shadcn/ui)
+│   ├── app/                # App Router pages and layouts
+│   ├── components/         # shadcn/ui components + custom components
+│   ├── lib/                # API client, hooks, utilities
+│   ├── package.json
+│   └── Dockerfile          # Next.js production image
 ├── migrations/             # SQL migrations (golang-migrate)
+│   ├── 000001_init.up.sql
+│   └── 000002_email_flows.up.sql
 ├── deploy/
 │   └── terraform/          # AWS infrastructure as code
+├── diagrams/               # Excalidraw architecture diagrams (SVG + PNG)
 ├── .github/
 │   └── workflows/          # GitHub Actions CI/CD
-├── docker-compose.yml      # Local dev dependencies (Postgres + Redis)
-├── Dockerfile              # Multi-stage production build
+├── docker-compose.yml      # One-command local dev (api + web + postgres + redis)
+├── Dockerfile.api          # Go API production image (~25 MB)
 ├── Makefile                # Dev commands (build, test, migrate, lint)
 ├── DESIGN.md               # Architecture decisions and rationale
-├── SECURITY.md             # Auth model and threat model
+├── SECURITY.md             # Auth model, threat model, restore runbook
+├── BUSINESS.md             # Distribution model, pricing, execution phases
 └── README.md               # This file
 ```
+
+> The `web/` directory is a standalone Next.js project with its own `package.json` and `Dockerfile`. The Go API and the dashboard are built and deployed as **separate container images**. They communicate over HTTP via the REST API. See [DESIGN.md → Container Strategy](./DESIGN.md#container-strategy-separate-images-single-docker-composeyml) for the rationale.
 
 ## Local Development
 

@@ -26,17 +26,20 @@
    - [Health Check Design](#health-check-design)
    - [SSE Event Format](#sse-event-format)
    - [SSE Reconnection & Backoff](#sse-reconnection--backoff)
+
+   *Web dashboard stack documented under [Tech Stack → Why Next.js for the web dashboard](#why-nextjs--shadcnui-for-the-web-dashboard)*
 8. [Observability](#observability)
 9. [Infrastructure (AWS)](#infrastructure-aws)
-10. [Cost Strategy](#cost-strategy)
-11. [Monetization Model](#monetization-model)
-12. [Competitive Landscape](#competitive-landscape)
-13. [Implementation Conventions](#implementation-conventions)
+10. [Deployment Strategy](#deployment-strategy)
+11. [Cost Strategy](#cost-strategy)
+12. [Monetization Model](#monetization-model)
+13. [Competitive Landscape](#competitive-landscape)
+14. [Implementation Conventions](#implementation-conventions)
     - [Logging](#logging)
     - [Database connection pool sizing](#database-connection-pool-sizing)
     - [Plan enforcement (tenant quotas)](#plan-enforcement-tenant-quotas)
-14. [Deferred Decisions](#deferred-decisions)
-15. [References](#references)
+15. [Deferred Decisions](#deferred-decisions)
+16. [References](#references)
 
 ---
 
@@ -133,6 +136,71 @@ Feature flags are **unidirectional**: the server pushes changes to clients. SSE 
 - Polling wastes resources and has minimum latency of 1 poll interval
 
 Each SSE connection in Go is a goroutine (~8KB stack). With 10,000 connected SDKs = ~80MB of memory. Completely manageable.
+
+### Why Next.js + shadcn/ui for the web dashboard
+
+The dashboard is a separate concern from the core server, but it's part of the product. The stack choice for it:
+
+```
+Next.js 15 (App Router)  +  TypeScript  +  Tailwind CSS  +  shadcn/ui
+```
+
+#### Why this stack and not the Go-native alternative (HTMX + templ)
+
+An earlier version of this doc recommended HTMX + templ — server-side rendered HTML driven by the same Go binary. That recommendation was reconsidered after re-prioritizing what matters for Flagstone:
+
+| Constraint | HTMX wins | Next.js wins |
+|---|---|---|
+| Single binary deploy | ✓ | ✗ |
+| Solo-dev maintenance burden | ✓ | ✗ |
+| Out-of-the-box visual quality | ✗ | ✓ |
+| AI-assisted development (Cursor, v0.dev, Claude Code) | ✗ | ✓ |
+| Designer-quality components without design skills | ✗ | ✓ (shadcn/ui) |
+| Industry-standard tooling and talent pool | ✗ | ✓ |
+| Type safety end-to-end | ✗ | ✓ (TypeScript) |
+
+For Flagstone specifically:
+- The dashboard is critical UX for non-technical users (PMs, designers) — visual quality matters
+- The solo dev (TV) is a Go expert with no significant frontend background — AI tooling support is decisive
+- The dashboard is not on the hot evaluation path (no QPS impact) — operational simplicity of Go doesn't apply
+- The deploy-complexity argument is solved by `docker-compose` (see [Container Strategy](#container-strategy)), which self-hosters need anyway for Postgres + Redis
+
+The honest cost: a second codebase to maintain, a build pipeline with Node.js, and a learning curve. The honest benefit: a dashboard that looks like Linear/Vercel/Resend without hiring a designer.
+
+#### Why each piece
+
+**Next.js 15 (App Router)**: largest training data of any frontend framework → best AI assistance. Server Components by default → fast initial paint without SPA overhead. Built-in image optimization, code splitting, streaming.
+
+**TypeScript (strict mode)**: tipos compartidos entre llamadas a la API y componentes. AI tools alucinan menos cuando tienen tipos para razonar. End-to-end safety.
+
+**Tailwind CSS**: utility classes are local and explicit — AI generates them correctly. No CSS-in-JS runtime overhead. Tree-shakeable to ~10 KB of CSS in production.
+
+**shadcn/ui**: not a npm library but a collection of components you copy into your codebase. Each component is React + Tailwind + Radix primitives, accessible by default, customizable. Designed by Vercel team — visual quality is Linear-tier out of the box. v0.dev (Vercel's AI tool) generates shadcn/ui specifically.
+
+#### Supporting libraries
+
+| Need | Library | Why |
+|---|---|---|
+| Data fetching + cache | **TanStack Query** | Stale-while-revalidate, retry, optimistic updates |
+| Form validation | **React Hook Form + Zod** | Type-safe schemas, low re-renders |
+| Auth client | **NextAuth.js** or **Lucia** | Battle-tested, integrates with the Go backend's JWT |
+| Tables | **TanStack Table** | What shadcn/ui's data-table is built on |
+| Charts (if needed) | **Recharts** | Composable React charting |
+| Testing | **Vitest + React Testing Library + Playwright** | Unit + integration + e2e |
+| Linting | **ESLint + Prettier + eslint-plugin-jsx-a11y** | A11y + format consistency |
+
+This is the same stack used by Linear, Cal.com, Resend, and Vercel themselves. Following the paved path means more documentation, more community help, more AI training data.
+
+#### What is NOT in the dashboard
+
+Things that don't belong in the dashboard codebase and are intentionally absent:
+
+- **Flag evaluation logic** — the dashboard calls the API, never evaluates rules itself
+- **Direct database access** — only through the REST API
+- **Authentication primitives** — only the client side of auth; tokens, hashing, RBAC live in the Go backend
+- **Business logic** — the dashboard is a thin UI over the API
+
+This separation keeps the dashboard replaceable. If someone wants a CLI-only experience, the Go server runs without the dashboard. If someone wants their own custom UI, they build it against the same REST API.
 
 ---
 
@@ -1419,6 +1487,206 @@ Multi-AZ doubles the cost (~$26/month vs $13/month post-free-tier) for a standby
 - For a service without SLAs yet, that's acceptable.
 
 When a paying customer requires 99.99% uptime, we enable Multi-AZ with a toggle in `terraform.tfvars`.
+
+---
+
+## Deployment Strategy
+
+How we ship new versions of Flagstone to production without downtime — and without over-engineering for a problem we don't have yet. The strategy evolves with scale; the early phases are intentionally simple.
+
+### Phase 1 — Single instance: Instance Refresh in ASG
+
+While Flagstone runs on a single EC2 (M1–M3), the only sensible strategy is a **rolling deploy** managed by an Auto Scaling Group:
+
+```
+ASG: min=1, max=2, desired=1
+
+Deploy sequence:
+  1. ASG temporarily raises desired to 2
+  2. New instance launches with v1.1 AMI
+  3. ALB waits for the new instance to pass health checks (/readyz)
+  4. Once healthy, ASG terminates the old v1.0 instance
+  5. desired returns to 1
+```
+
+**Why this and not blue/green here**: blue/green requires two parallel environments, which doubles infrastructure cost. With a single instance and no paying customers, the math doesn't justify it.
+
+**Why this and not canary here**: canary requires multiple instances to make weighted traffic splits meaningful. You can't canary-deploy 5% of traffic to 0.05 instances.
+
+**Rollback**: relaunch the previous AMI via the same instance-refresh mechanism. ~5 minutes to revert.
+
+**Cost**: ~$0 — the second instance only exists for ~3 minutes during the deploy.
+
+Concrete Terraform:
+```hcl
+resource "aws_autoscaling_group" "flagstone" {
+  min_size         = 1
+  max_size         = 2
+  desired_capacity = 1
+  # ... launch template, health checks, ALB target group ...
+}
+
+resource "aws_autoscaling_group_instance_refresh" "deploy" {
+  # Trigger this on every release via CI
+}
+```
+
+### Phase 2 — Multi-instance Cloud: Blue/Green via ALB
+
+Once Flagstone Cloud runs with 3-5+ instances and we have customers paying for some level of SLA, blue/green becomes the right tool:
+
+```
+ALB Listener:
+  └─ Target Group "blue"  ← 100% traffic (v1.0)
+  └─ Target Group "green" ← 0% traffic (v1.1, idle but warm)
+
+Deploy:
+  1. Deploy v1.1 to green target group
+  2. Run smoke tests against green (private endpoint)
+  3. Switch ALB listener rule: green = 100%, blue = 0%
+  4. Monitor for 10-30 min
+  5. If healthy: tear down blue, green becomes the new blue
+  6. If broken: switch back to blue — rollback in seconds
+```
+
+**Why we wait until Phase 2 to adopt this**: blue/green doubles infrastructure cost during deploys (and a bit beyond, during the verification window). That cost is justified once SLA matters — when a 5-minute rollback to fix a broken deploy is worth the $20/month of extra infra.
+
+**Tooling**: AWS CodeDeploy handles this natively with `DeploymentType: BLUE_GREEN`. Terraform wires it up via `aws_codedeploy_deployment_group`.
+
+### Phase 3 — Enterprise SLA: Canary with metric gates
+
+When we have customers paying for 99.9% SLA (~43 min/month tolerated downtime), a broken deploy costs real money. Canary minimizes blast radius:
+
+```
+Fase 1:  5% → v1.1, 95% → v1.0   (15 min observation window)
+Fase 2: 25% → v1.1, 75% → v1.0   (30 min)
+Fase 3: 50% → v1.1, 50% → v1.0   (1 hour)
+Fase 4: 100% → v1.1
+```
+
+Each phase has automatic gates:
+- `flag_evaluation_duration_seconds{quantile="0.99"}` must not regress > 20%
+- `flagstone_api_requests_total{status=~"5.."}` rate must stay below baseline
+- If any gate fails: pause the ramp, alert, optionally auto-rollback
+
+**Requirements**: weighted target groups (ALB supports this natively), automated metric-based gates (Datadog, Grafana with alerting, or AWS CloudWatch), and at least 5+ instances so that 5% is meaningful traffic.
+
+### The dogfood trick: feature flags + simple rolling deploys
+
+There's a strategy that beats canary-at-the-infrastructure-level for most situations: **canary at the feature level using Flagstone itself**.
+
+```
+1. Deploy v1.1 to ALL instances via rolling deploy (cheap, simple)
+2. New feature lives behind: if flagstone.IsEnabled(ctx, "new-eval-engine", user) { ... }
+3. Flag defaults to false — feature is dark-launched
+4. Activate flag for 5% of users → watch metrics
+5. Ramp to 25%, 50%, 100% over hours/days
+6. If something breaks: toggle the flag off in <100ms — no redeploy needed
+```
+
+This is the **decouple-deploy-from-release** pattern that we sell to customers. We use it on ourselves. Combining this with a simple rolling deploy gives:
+- Cheap, simple infrastructure deploys
+- Granular runtime control over features
+- Instant rollback of any feature without touching infra
+
+This is the long-term strategy. Even when we adopt blue/green in Phase 2, feature-flag-gated rollouts remain the primary way to control feature exposure.
+
+### When to migrate between phases
+
+| Trigger | Move to |
+|---|---|
+| MRR > $2k AND 3+ instances running | Phase 2 (blue/green) |
+| First customer with contractual 99.9% SLA | Phase 3 (canary) |
+| Deploy frequency > 1/day | Phase 3 (the operational discipline pays off) |
+| Any signs of "deploys are scary" in the team | Re-evaluate — usually means missing observability, not missing strategy |
+
+Premature adoption of Phase 2 or Phase 3 is a classic startup mistake. The complexity isn't free: it adds CI configuration, monitoring requirements, and operational knowledge that has to be maintained even when no deploy is happening. Stay simple until the simpler option causes a real, observed problem.
+
+### Container Strategy: separate images, single `docker-compose.yml`
+
+The codebase produces **two container images**, not one. They are deployed together via Docker Compose for self-hosters or as independent services in production Cloud.
+
+#### Why separate images instead of one bundled image
+
+An earlier idea was to bundle the Go binary and the Next.js dashboard into a single image to preserve the "one binary" pitch. After analysis, separate images are clearly better:
+
+| Concern | Bundled image | Separate images |
+|---|---|---|
+| Self-host UX (one command) | ✓ `docker run` | ✓ `docker compose up` |
+| Rebuild time on frontend-only change | ~5 min (rebuilds Go too) | ~1 min (only the web image) |
+| Rebuild time on backend-only change | ~5 min (rebuilds Next.js too) | ~1 min |
+| Independent scaling in production | ✗ | ✓ (5 API replicas + 1 web replica) |
+| Independent security patches | ✗ (coupled releases) | ✓ |
+| Industry-standard for K8s / ECS / Cloud Run | ✗ (requires refactor) | ✓ |
+| Image size | ~80 MB combined | ~25 MB (API) + ~120 MB (web), parallel pull |
+
+Self-hosters need Postgres + Redis anyway, so they're already running `docker compose`. Asking them to start two more services in the same compose file is zero added friction.
+
+#### Image layout
+
+```
+flagstone/
+├── Dockerfile.api          → built as flagstone-api:vX.Y.Z
+│   - Multi-stage Go build
+│   - Final stage: alpine + the static binary (~25 MB)
+│
+├── web/
+│   └── Dockerfile          → built as flagstone-web:vX.Y.Z
+│       - Multi-stage Node build (deps → build → run)
+│       - Final stage: node:alpine + Next.js standalone output (~120 MB)
+│
+└── docker-compose.yml      → references both images + postgres + redis
+```
+
+#### Self-host onboarding (the "fewer than 5 commands" path)
+
+```bash
+# Download the canonical compose file
+curl -O https://raw.githubusercontent.com/thomas-vilte/flagstone/main/docker-compose.yml
+
+# Generate a strong JWT secret and DB password
+cat > .env <<EOF
+JWT_SECRET=$(openssl rand -hex 32)
+DB_PASSWORD=$(openssl rand -hex 16)
+EOF
+
+# Start everything
+docker compose up -d
+
+# (Optional) Run migrations — automated on container start in our image, but a self-hoster
+# may want to inspect the schema first
+docker compose exec api /flagstone migrate up
+```
+
+The user is at `http://localhost:3000` with a working dashboard in under 60 seconds. Postgres, Redis, the Go API, and the Next.js dashboard all running. The dashboard prompts them through `/setup` for tenant + admin user creation.
+
+#### Production Cloud deployment
+
+In Cloud, the two images deploy to different infrastructure:
+
+| Image | Where it runs | Why |
+|---|---|---|
+| `flagstone-api` | AWS ECS / EC2 ASG | Long-lived, stateful (SSE), needs to scale based on QPS |
+| `flagstone-web` | Vercel (or ECS) | Mostly static, can run on the framework's native platform — Vercel is free up to substantial traffic |
+
+This split lets us scale them independently and use the right tool for each. Vercel is excellent for Next.js (their own product); putting the API there too would waste their cold-start latency for a long-running service.
+
+#### Why this doesn't break the "single binary" pitch
+
+The Go API is still a single binary. That binary + Postgres + Redis is still the deployment unit for anyone who wants API-only access (e.g., CLI users, programmatic use, dashboard-less deployments). The web dashboard is an *optional* second service.
+
+Documentation makes this explicit: "Flagstone is a single Go binary + Postgres for the API, plus an optional Next.js dashboard."
+
+### What deploy strategy does NOT solve
+
+It's worth being explicit: deploy strategy is about **how to ship a binary change**. It does not solve:
+
+- **Database migrations**: those follow the expand-contract pattern (see [Zero-downtime Migration Strategy](#zero-downtime-migration-strategy))
+- **Long-lived SSE connections**: those need graceful shutdown that drains connections, separate from deploy strategy
+- **Cache consistency across instances**: handled by Redis pub/sub, orthogonal to deploys
+- **Schema-breaking changes**: those need a deprecation window via API versioning, not a fancy deploy
+
+Each of those has its own mechanism. Conflating them is a common source of bugs.
 
 ---
 
