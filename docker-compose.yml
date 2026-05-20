@@ -1,0 +1,34 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: flagstone_postgres
+    environment:
+      POSTGRES_USER: flagstone
+      POSTGRES_PASSWORD: flagstone_dev
+      POSTGRES_DB: flagstone
+    ports:
+      - "5432:5432"
+    volumes:
+      - flagstone-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flagstone -d flagstone"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: flagstone_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - flagstone-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  flagstone-postgres-data:
+  flagstone-redis-data:
