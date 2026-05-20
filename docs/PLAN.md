@@ -45,8 +45,9 @@
 
 | Componente | Estado |
 |---|---|
-| `docker-compose.yml` | No existe (bloquea `make setup/down/clean`) |
-| `go.sum` | No existe (dependencias no resueltas) |
+| `docker-compose.yml` | Completo | Postgres 16 + Redis 7, healthchecks, volumes |
+| `go.sum` | Completo | Dependencias resueltas |
+| `main.go` con config + readyz | Completo | Integrado con `config.Load()`, connectWithRetry, pool, `/readyz` |
 | `internal/storage/` | Vacio (solo `.gitkeep`) |
 | `internal/auth/` | Vacio (solo `.gitkeep`) |
 | `internal/api/` | Vacio (solo `.gitkeep`) |
@@ -285,20 +286,20 @@ func connectWithRetry(ctx context.Context, url string, logger *zap.Logger) (*pgx
 
 ### Checklist Fase 0
 
-- [ ] Crear `docker-compose.yml` con Postgres 16 + Redis 7, healthchecks, volumes
-- [ ] Agregar dependencias a `go.mod` (pgx, redis, jwt, x/crypto, x/sync, testify)
-- [ ] Ejecutar `go mod tidy` para generar `go.sum`
-- [ ] Integrar `config.Load()` en `main.go` (eliminar `envOr` duplicado)
-- [ ] Implementar `connectWithRetry` para Postgres (5 intentos, backoff exponencial)
-- [ ] Inicializar pool de Postgres con config (25 MaxConns, 5 MinConns, etc.)
-- [ ] Inicializar Redis client
-- [ ] Implementar `/readyz` endpoint (SELECT 1 a Postgres, PING a Redis)
-- [ ] Agregar `uptime_seconds` a `/healthz` (trackear `startTime`)
-- [ ] Verificar: `make setup` levanta ambos servicios
-- [ ] Verificar: `make migrate` aplica ambas migraciones sin error
-- [ ] Verificar: `make run` inicia el servidor
-- [ ] Verificar: `curl /healthz` retorna `{"status":"ok","version":"dev","uptime_seconds":N}`
-- [ ] Verificar: `curl /readyz` retorna checks de postgres y redis "up"
+- [x] Crear `docker-compose.yml` con Postgres 16 + Redis 7, healthchecks, volumes
+- [x] Agregar dependencias a `go.mod` (pgx, redis, jwt, x/crypto, x/sync, testify)
+- [x] Ejecutar `go mod tidy` para generar `go.sum`
+- [x] Integrar `config.Load()` en `main.go` (eliminar `envOr` duplicado)
+- [x] Implementar `connectWithRetry` para Postgres (5 intentos, backoff exponencial)
+- [x] Inicializar pool de Postgres con config (25 MaxConns, 5 MinConns, etc.)
+- [x] Inicializar Redis client
+- [x] Implementar `/readyz` endpoint (SELECT 1 a Postgres, PING a Redis)
+- [x] Agregar `uptime_seconds` a `/healthz` (trackear `startTime`)
+- [x] Verificar: `make setup` levanta ambos servicios
+- [x] Verificar: `make migrate` aplica ambas migraciones sin error
+- [x] Verificar: `make run` inicia el servidor
+- [x] Verificar: `curl /healthz` retorna `{"status":"ok","version":"dev","uptime_seconds":N}`
+- [x] Verificar: `curl /readyz` retorna checks de postgres y redis "up"
 
 ---
 

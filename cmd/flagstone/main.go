@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -9,6 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+	"github.com/thomas-vilte/flagstone/internal/config"
 	"go.uber.org/zap"
 )
 
@@ -18,9 +22,24 @@ var (
 	date    = "unknown"
 )
 
+type readinessResponse struct {
+	Status string                    `json:"status"`
+	Checks map[string]readinessCheck `json:"checks"`
+}
+
+type readinessCheck struct {
+	Status    string `json:"status"`
+	LatencyMS int64  `json:"latency_ms,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type healthResponse struct {
+	Status        string `json:"status"`
+	Version       string `json:"version"`
+	UptimeSeconds int64  `json:"uptime_seconds"`
+}
+
 func main() {
-	// Production logger: JSON output, no caller info (cheaper at high QPS),
-	// ISO8601 timestamps. Use NewDevelopment() for human-readable local logs.
 	logger, err := zap.NewProduction()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "logger init: %v\n", err)
@@ -28,48 +47,67 @@ func main() {
 	}
 	defer logger.Sync() //nolint:errcheck // sync on shutdown is best-effort
 
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Fatal("failed to load config", zap.Error(err))
+	}
+
+	startedAt := time.Now()
+
 	logger.Info("starting flagstone",
 		zap.String("version", version),
 		zap.String("commit", commit),
 		zap.String("date", date),
+		zap.String("addr", cfg.Addr),
+		zap.String("environment", cfg.Environment),
 	)
 
-	// TODO: Load config from environment / flags
-	// TODO: Initialize database connection pool (see DESIGN.md → Connection pool sizing)
-	// TODO: Initialize Redis client
-	// TODO: Initialize rule engine
-	// TODO: Initialize OpenTelemetry provider
-	// TODO: Set up HTTP routes (API + SSE)
+	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	dbPool, err := connectPostgresWithRetry(rootCtx, cfg.DatabaseURL, logger)
+	if err != nil {
+		logger.Fatal("failed to connect to postgres", zap.Error(err))
+	}
+	defer dbPool.Close()
+
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: redisAddrFromURL(cfg.RedisURL),
+	})
+	defer redisClient.Close()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","version":"%s"}`, version)
+		writeJSON(w, http.StatusOK, healthResponse{
+			Status:        "ok",
+			Version:       version,
+			UptimeSeconds: int64(time.Since(startedAt).Seconds()),
+		})
 	})
 
-	addr := envOr("FLAGSTONE_ADDR", ":8080")
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		resp, status := checkReadiness(r.Context(), dbPool, redisClient)
+		writeJSON(w, status, resp)
+	})
+
 	srv := &http.Server{
-		Addr:         addr,
+		Addr:         cfg.Addr,
 		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second, // SSE connections need longer writes
+		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Graceful shutdown: listen for SIGINT/SIGTERM, drain connections, exit.
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	go func() {
-		logger.Info("listening", zap.String("addr", addr))
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logger.Info("listenig", zap.String("addr", cfg.Addr))
+		if err := srv.ListenAndServe(); err != nil {
 			logger.Error("server error", zap.Error(err))
 			os.Exit(1)
 		}
 	}()
 
-	<-ctx.Done()
-	logger.Info("shutting down gracefully...")
+	<-rootCtx.Done()
+	logger.Info("shutting down gracefully")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -82,10 +120,102 @@ func main() {
 	logger.Info("server stopped")
 }
 
-// envOr returns the value of the environment variable key, or fallback if unset.
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func redisAddrFromURL(raw string) string {
+	const prefix = "redis://"
+	if len(raw) >= len(prefix) && raw[:len(prefix)] == prefix {
+		return raw[len(prefix):]
 	}
-	return fallback
+	return raw
+}
+
+func checkReadiness(ctx context.Context, dbPool *pgxpool.Pool, redisClient *redis.Client) (readinessResponse, int) {
+	resp := readinessResponse{
+		Status: "ready",
+		Checks: map[string]readinessCheck{},
+	}
+	dbStart := time.Now()
+	dbCtx, dbCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer dbCancel()
+	if err := dbPool.Ping(dbCtx); err != nil {
+		resp.Status = "not_ready"
+		resp.Checks["postgres"] = readinessCheck{
+			Status: "down",
+			Error:  err.Error(),
+		}
+	} else {
+		resp.Checks["postgres"] = readinessCheck{
+			Status:    "up",
+			LatencyMS: time.Since(dbStart).Milliseconds(),
+		}
+	}
+	redisStart := time.Now()
+	redisCtx, redisCancel := context.WithTimeout(ctx, 1*time.Second)
+	defer redisCancel()
+	if err := redisClient.Ping(redisCtx).Err(); err != nil {
+		resp.Checks["redis"] = readinessCheck{
+			Status: "down",
+			Error:  err.Error(),
+		}
+	} else {
+		resp.Checks["redis"] = readinessCheck{
+			Status:    "up",
+			LatencyMS: time.Since(redisStart).Milliseconds(),
+		}
+	}
+	if resp.Checks["postgres"].Status != "up" {
+		return resp, http.StatusServiceUnavailable
+	}
+	return resp, http.StatusOK
+}
+
+func connectPostgresWithRetry(ctx context.Context, databaseURL string, logger *zap.Logger) (*pgxpool.Pool, error) {
+	var lastErr error
+	backoff := time.Second
+
+	for attempt := 1; attempt <= 5; attempt++ {
+		poolCfg, err := pgxpool.ParseConfig(databaseURL)
+		if err != nil {
+			return nil, fmt.Errorf("parse pg config: %w", err)
+		}
+		poolCfg.MaxConns = 25
+		poolCfg.MinConns = 5
+		poolCfg.MaxConnLifetime = time.Hour
+		poolCfg.MaxConnIdleTime = 5 * time.Minute
+		poolCfg.HealthCheckPeriod = 30 * time.Second
+
+		pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+		if err == nil {
+			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			pingErr := pool.Ping(pingCtx)
+			cancel()
+			if pingErr == nil {
+				return pool, nil
+			}
+			lastErr = pingErr
+			pool.Close()
+		} else {
+			lastErr = err
+		}
+
+		logger.Warn("postgres not ready, retrying",
+			zap.Int("attempt", attempt),
+			zap.Duration("backoff", backoff),
+			zap.Error(lastErr),
+		)
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+			backoff *= 2
+		}
+	}
+
+	return nil, fmt.Errorf("connect postgres after retries: %w", lastErr)
 }
