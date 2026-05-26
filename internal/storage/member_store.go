@@ -142,3 +142,39 @@ func (s *MemberStore) Remove(ctx context.Context, tenantID, userID uuid.UUID) er
 
 	return nil
 }
+
+// ListByUser returns all tenant memberships for a given user.
+func (s *MemberStore) ListByUser(ctx context.Context, userID uuid.UUID) ([]TenantMember, error) {
+	const query = `
+	SELECT tenant_id, user_id, role, created_at
+	FROM tenant_members
+	WHERE user_id = $1
+	ORDER BY created_at ASC
+	`
+
+	rows, err := s.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("storage.MemberStore.ListByUser: %w", err)
+	}
+	defer rows.Close()
+
+	members := make([]TenantMember, 0)
+	for rows.Next() {
+		var member TenantMember
+		if err := rows.Scan(
+			&member.TenantID,
+			&member.UserID,
+			&member.Role,
+			&member.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("storage.MemberStore.ListByUser: scan row: %w", err)
+		}
+		members = append(members, member)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage.MemberStore.ListByUser: iterate rows: %w", err)
+	}
+
+	return members, nil
+}
