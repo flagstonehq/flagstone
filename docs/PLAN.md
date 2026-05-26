@@ -920,117 +920,263 @@ Response 409 Conflict (si ya existe un tenant):
 
 ### Checklist Fase 3
 
-- [ ] Crear `internal/api/server.go` (Server struct, Routes, middleware chain)
-- [ ] Crear `internal/api/response.go` (JSON, Error, ErrorFromDomain)
-- [ ] Crear `internal/api/request.go` (DecodeJSON con body limit + content-type)
-- [ ] Crear `internal/api/context.go` (helpers para extraer del context)
-- [ ] Crear `internal/api/middleware/recover.go`
-- [ ] Crear `internal/api/middleware/request_id.go`
-- [ ] Crear `internal/api/middleware/logger.go`
-- [ ] Crear `internal/api/middleware/body_limit.go`
-- [ ] Crear `internal/api/middleware/content_type.go`
-- [ ] Crear `internal/api/middleware/auth_jwt.go`
-- [ ] Crear `internal/api/middleware/auth_apikey.go`
-- [ ] Crear `internal/api/middleware/rbac.go` (RequireRole)
-- [ ] Crear `internal/api/handlers/setup.go` (POST /api/v1/setup)
-- [ ] Tests: `recover_test.go`
-- [ ] Tests: `request_id_test.go`
-- [ ] Tests: `logger_test.go`
-- [ ] Tests: `body_limit_test.go`
-- [ ] Tests: `content_type_test.go`
-- [ ] Tests: `auth_jwt_test.go`
-- [ ] Tests: `auth_apikey_test.go`
-- [ ] Tests: `rbac_test.go`
-- [ ] Tests: `setup_test.go` (bootstrap exitoso, 409, validacion)
+- [x] Crear `internal/api/server.go` (Server struct, Routes, middleware chain)
+- [x] Crear `internal/api/middleware/response.go` (JSON, Error, ErrorFromDomain)
+- [x] Crear `internal/api/request.go` (DecodeJSON con body limit + content-type)
+- [x] Crear `internal/api/middleware/context.go` (helpers para extraer del context)
+- [x] Crear `internal/api/middleware/recover.go`
+- [x] Crear `internal/api/middleware/request_id.go`
+- [x] Crear `internal/api/middleware/logger.go`
+- [x] Crear `internal/api/middleware/body_limit.go`
+- [x] Crear `internal/api/middleware/content_type.go`
+- [x] Crear `internal/api/middleware/auth_jwt.go`
+- [x] Crear `internal/api/middleware/auth_apikey.go` (incluye `expires_at` check y `last_used_at` async)
+- [x] Crear `internal/api/middleware/rbac.go` (RequireRole)
+- [x] Crear `internal/api/setup.go` (POST /api/v1/setup)
+- [x] Tests: `recover_test.go`
+- [x] Tests: `request_id_test.go`
+- [x] Tests: `logger_test.go`
+- [x] Tests: `body_limit_test.go`
+- [x] Tests: `content_type_test.go`
+- [x] Tests: `auth_jwt_test.go`
+- [x] Tests: `auth_apikey_test.go` (missing/unknown/valid/expired/revoked)
+- [x] Tests: `rbac_test.go`
+- [x] Tests: `setup_test.go` (success, 409, validacion, wrong content-type, GET, body too large, password >72)
 
 ---
 
 ## 8. Fase 4 — Auth Endpoints
 
-**Objetivo:** Login, refresh, logout funcionales con token rotation.
+**Objetivo:** Login, refresh, logout funcionales con token rotation, soporte multi-tenant, account lockout (T19) y refresh token reuse detection (T20).
+
+### Cambios vs. spec original
+
+Esta fase incorpora 3 features adicionales que en el plan inicial no estaban:
+
+1. **Multi-tenant login**: `users.email` es global, `tenant_members` es many-to-many. Un usuario puede pertenecer a varios tenants — el login tiene que resolver a cuál.
+2. **Account lockout (T19)**: rate limit por IP no alcanza si el atacante rota IPs. Lockout per-user es la defensa complementaria.
+3. **Refresh token reuse detection (T20)**: si un refresh ya rotado se presenta de nuevo, es señal de compromiso → matar todas las sessions del user.
+
+Las 3 están reflejadas en `SECURITY.md` (sección Authentication + threat matrix T19/T20).
+
+### Migración nueva
+
+```
+migrations/000003_auth_phase4.up.sql
+```
+
+Tablas a agregar:
+
+```sql
+CREATE TABLE login_attempts (
+    id         BIGSERIAL    PRIMARY KEY,
+    user_id    UUID         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    ip_address INET,
+    failed_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX login_attempts_user_recent_idx
+    ON login_attempts(user_id, failed_at DESC);
+
+-- Retencion: cleanup periodico de filas con failed_at < NOW() - INTERVAL '1 day'
+
+CREATE TABLE revoked_refresh_tokens (
+    refresh_hash CHAR(64)    PRIMARY KEY,
+    user_id      UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    revoked_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at   TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX revoked_refresh_tokens_expires_idx
+    ON revoked_refresh_tokens(expires_at);
+
+-- Retencion: cleanup periodico de filas con expires_at < NOW()
+```
+
+**Por qué `BIGSERIAL` en `login_attempts`**: alto volumen de inserts esperado, no necesita UUID (no es expuesto al cliente).
+
+**Por qué `CHAR(64)` PK en `revoked_refresh_tokens`**: el hash es la clave de lookup natural. Sin id sobrante.
 
 ### Estructura de archivos
 
 ```
-internal/api/handlers/
-├── auth.go            # login, refresh, logout handlers
+internal/api/
+├── auth.go            # login, refresh, logout, mfa handlers
 └── auth_test.go       # integration tests
+
+internal/storage/
+├── login_attempt_store.go        # Record, CountSince, ClearForUser
+├── login_attempt_store_test.go
+├── revoked_token_store.go        # Insert, Lookup, CleanupExpired
+├── revoked_token_store_test.go
 ```
 
-### Detalle por archivo
+### Detalle por endpoint
 
-#### `handlers/auth.go`
-
-**`POST /api/v1/auth/login`**:
+#### `POST /api/v1/auth/login` (multi-tenant híbrido)
 
 ```
-Body: { "email": "admin@acme.com", "password": "..." }
+Body:
+{
+  "email": "ana@acme.com",
+  "password": "...",
+  "tenant_slug": "acme"   // OPCIONAL
+}
 
-Server:
-  1. Validar email + password (formato, largo)
-  2. Lookup user by email (CITEXT, case-insensitive)
-  3. bcrypt.CompareHashAndPassword(stored_hash, password)
-  4. Si falla -> 401 (mensaje generico, no distingue user no existe vs password incorrecto)
-  5. Generar JWT access token (15 min)
-  6. Generar refresh token (opaque, 7 dias)
-  7. INSERT INTO sessions (SHA-256 del refresh token)
-  8. UPDATE users SET last_login_at = NOW()
-  9. INSERT INTO audit_log (auth.login)
-  10. Retornar { access_token, token_type: "Bearer", expires_in: 900 }
-  11. Set-Cookie: refresh_token=<opaque>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth
+Server (orden de checks):
+  1. Validar formato email + largo password (8-72 chars)
+  2. Lookup user by email (CITEXT)
+     - Si no existe: bcrypt-time fake hash para evitar timing oracle, 401 generico
+  3. Check account lockout (T19):
+     - SELECT COUNT(*) FROM login_attempts
+       WHERE user_id = $1 AND failed_at > NOW() - INTERVAL '15 minutes'
+     - Si count >= 5: 423 Locked con Retry-After header
+  4. bcrypt.CompareHashAndPassword
+     - Si falla: INSERT INTO login_attempts, INSERT audit (auth.login_failed), 401 generico
+  5. Resolver tenant context:
+     a. Si tenant_slug provisto:
+        - JOIN tenant_members + tenants verificar membership
+        - Si no es miembro: 403 NOT_A_MEMBER (mensaje generico)
+     b. Si tenant_slug ausente:
+        - SELECT memberships del user
+        - 0 memberships: 403 NO_TENANT_ACCESS
+        - 1 membership: usar ese tenant
+        - 2+ memberships: 409 MULTIPLE_TENANTS con lista en response
+  6. Generar JWT access (15 min) con sub=user_id, tid=tenant_id, role
+  7. Generar refresh token (32 bytes crypto/rand)
+  8. Transaccion:
+     - INSERT INTO sessions (refresh_hash = SHA-256(token))
+     - UPDATE users SET last_login_at = NOW()
+     - DELETE FROM login_attempts WHERE user_id = $1  (clear on success)
+     - INSERT INTO audit_log (auth.login)
+  9. Set-Cookie + return access_token
+
+Response 200 (single tenant o tenant_slug resuelto):
+{
+  "access_token": "eyJhbGci...",
+  "token_type": "Bearer",
+  "expires_in": 900,
+  "tenant": { "id": "...", "slug": "acme", "role": "owner" }
+}
+
+Response 409 MULTIPLE_TENANTS:
+{
+  "error": {
+    "code": "MULTIPLE_TENANTS",
+    "message": "Specify tenant_slug to continue.",
+    "available_tenants": [
+      { "slug": "acme", "name": "Acme Corp", "role": "owner" },
+      { "slug": "beta-labs", "name": "Beta Labs", "role": "viewer" }
+    ]
+  }
+}
+
+Response 423 Locked:
+{
+  "error": {
+    "code": "ACCOUNT_LOCKED",
+    "message": "Account locked due to repeated failed logins. Try again in 15 minutes.",
+    "retry_after": 900
+  }
+}
++ Header: Retry-After: 900
 ```
 
-**`POST /api/v1/auth/refresh`**:
+**Notas críticas**:
+
+- El paso 2 hashea siempre, incluso si el user no existe, para mantener tiempo de respuesta constante (timing oracle defense).
+- El paso 3 ocurre ANTES del bcrypt para no quemar CPU en cuentas lockeadas (DoS amplification).
+- El paso 5b nunca retorna 200 con tenant arbitrario — eso violaría el principio de "el rol no es global".
+- Los mensajes 401 son idénticos para "user no existe", "password mal", "user no verificado" → previene enumeration.
+
+#### `POST /api/v1/auth/refresh` (con reuse detection)
 
 ```
 Cookie: refresh_token=<opaque>
 
 Server:
-  1. Extraer refresh token del cookie httpOnly
-  2. SHA-256(token) -> lookup en sessions
-  3. Verificar expires_at > NOW()
-  4. DELETE old session (token rotation)
-  5. INSERT new session con nuevo refresh token
-  6. Generar nuevo JWT access token
-  7. INSERT INTO audit_log (auth.refresh)
-  8. Retornar nuevo access_token + Set-Cookie nuevo refresh_token
+  1. Extraer refresh token del cookie
+  2. Computar hash = SHA-256(token)
+  3. Lookup en sessions:
+     a. Si encontrado y no expirado: flow normal
+     b. Si NO encontrado: lookup en revoked_refresh_tokens
+        - Si encontrado ALLI: REUSE DETECTADO (T20)
+          - DELETE FROM sessions WHERE user_id = $victim
+          - INSERT audit (auth.refresh_reuse_detected)
+          - Send alert email (async)
+          - Clear cookie, return 401
+        - Si tampoco: token desconocido, return 401
+  4. Flow normal (token encontrado en sessions):
+     - Generar nuevo refresh token + JWT
+     - Transaccion:
+       * INSERT old hash INTO revoked_refresh_tokens (expires_at = old expires_at)
+       * DELETE FROM sessions WHERE refresh_hash = $old_hash
+       * INSERT INTO sessions (new refresh_hash)
+       * INSERT audit (auth.refresh)
+     - Set-Cookie nuevo + return access_token
 ```
 
-**Token rotation** (de SECURITY.md): Cada refresh invalida el viejo refresh token y emite uno nuevo. Si un atacante roba un refresh token y el usuario legitimo tambien hace refresh, uno de los dos recibe "invalid token" — senalando la compromision.
+**El truco**: la tabla `revoked_refresh_tokens` retiene hashes rotados durante `REFRESH_TOKEN_TTL` (7 días por defecto). Una vez expirado, el cleanup periódico lo borra. Si un atacante presenta un token rotado, lo agarrás.
 
-**`POST /api/v1/auth/logout`**:
+**Si el atacante usa el token antes que el legítimo**: el atacante consigue una rotation exitosa, el legítimo presenta el ahora-rotado token y dispara el reuse detection → ambos quedan fuera. El legítimo recibe el email de alerta.
+
+#### `POST /api/v1/auth/logout`
 
 ```
 Authorization: Bearer <access_token>
 Cookie: refresh_token=<opaque>
 
 Server:
-  1. DELETE session matching refresh_hash
-  2. Clear refresh_token cookie (Set-Cookie con MaxAge=-1)
-  3. INSERT INTO audit_log (auth.logout)
+  1. Computar hash = SHA-256(refresh_token)
+  2. Transaccion:
+     - SELECT refresh_hash, expires_at FROM sessions WHERE refresh_hash = $hash
+     - INSERT INTO revoked_refresh_tokens (...)  -- previene reuse despues de logout
+     - DELETE FROM sessions WHERE refresh_hash = $hash
+     - INSERT audit (auth.logout)
+  3. Clear refresh_token cookie (MaxAge=-1)
+  4. Return 204
 ```
 
-El access token JWT queda valido hasta su expiracion de 15 min (stateless). Para invalidacion inmediata se podria agregar un blocklist en Redis despues, pero para 15 minutos de exposicion el tradeoff es aceptable (de SECURITY.md).
+Mismo principio: agregás el hash a la blocklist al hacer logout, asi si alguien clava ese refresh despues de un logout, lo detectás como reuse.
 
 ### Tests Fase 4
 
 | Test | Que verifica |
 |---|---|
-| Login exitoso | 201, access_token valido, refresh_token cookie set, audit log entry |
-| Login password incorrecto | 401, mensaje generico (no dice "password incorrect") |
-| Login email no existe | 401, mismo mensaje generico (previene enumeration) |
-| Login email invalido | 400 |
-| Refresh exitoso | Nuevo access_token, nuevo refresh_token cookie, old session deleted |
+| Login single-tenant success | 200, JWT con tid correcto, refresh cookie, audit entry |
+| Login multi-tenant sin slug | 409 MULTIPLE_TENANTS, lista de tenants en response |
+| Login multi-tenant con slug | 200, JWT con tid del slug indicado |
+| Login con slug invalido (no miembro) | 403 NOT_A_MEMBER, mensaje generico |
+| Login password incorrecto | 401 generico, INSERT en login_attempts |
+| Login email no existe | 401 generico, tiempo de respuesta similar a password mal |
+| Login con 5 intentos fallidos | 6to intento → 423 Locked con Retry-After |
+| Login exitoso despues de fails parciales | Limpia login_attempts del user |
+| Login sin tenants asociados | 403 NO_TENANT_ACCESS |
+| Refresh exitoso | Nuevo access + refresh, old hash en revoked_refresh_tokens |
 | Refresh con token expirado | 401 |
-| Refresh con token ya usado (replay) | 401 (token rotation lo invalido) |
-| Logout exitoso | Session deleted, cookie cleared |
+| Refresh con token desconocido | 401 |
+| Refresh con token rotado (REUSE) | 401 + DELETE FROM sessions + audit entry refresh_reuse_detected |
+| Refresh attack scenario | Token usado por atacante → legítimo dispara reuse detection → ambos quedan fuera |
+| Logout exitoso | Session deleted, hash en revoked_refresh_tokens, cookie cleared |
+| Logout luego refresh con mismo token | 401, ya esta en revoked |
+| Account locked timing | Lockout check corre ANTES de bcrypt (medible: respuesta < bcrypt-time) |
 
 ### Checklist Fase 4
 
-- [ ] Crear `internal/api/handlers/auth.go` (login, refresh, logout)
-- [ ] Tests: login exitoso, password incorrecto, email no existe, email invalido
-- [ ] Tests: refresh exitoso, token expirado, replay detection
-- [ ] Tests: logout exitoso, session deleted
+- [ ] Migration `000003_auth_phase4.up.sql` (login_attempts + revoked_refresh_tokens) + down
+- [ ] Crear `internal/storage/login_attempt_store.go` (Record, CountSince, ClearForUser)
+- [ ] Crear `internal/storage/revoked_token_store.go` (Insert, Lookup, CleanupExpired)
+- [ ] Tests de storage: login_attempt_store_test.go, revoked_token_store_test.go
+- [ ] Refactor stores a interface `Querier` (preparacion para Fase 5 — ver Decisiones Técnicas)
+- [ ] Crear `internal/api/auth.go` con login (multi-tenant), refresh (reuse detection), logout
+- [ ] Tests: login single-tenant, multi-tenant con/sin slug, slug invalido, sin tenants
+- [ ] Tests: login password incorrecto, email no existe (timing equivalente)
+- [ ] Tests: account lockout (5 fails → 423, lockout check antes de bcrypt)
+- [ ] Tests: refresh exitoso, expirado, desconocido, reuse detection
+- [ ] Tests: refresh attack scenario completo (atacante + legitimo)
+- [ ] Tests: logout exitoso, logout + refresh re-uso
+- [ ] Job de cleanup: scheduled task que borra `login_attempts` con failed_at > 1 dia y `revoked_refresh_tokens` con expires_at < NOW() (puede ser cron externo o goroutine en main.go)
+- [ ] Actualizar threat matrix en SECURITY.md: T19, T20 → "Mitigated"
 
 ---
 

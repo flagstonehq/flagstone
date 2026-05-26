@@ -263,6 +263,120 @@ Server:
 
 The access token remains valid until its 15-minute expiration (JWTs are stateless). For immediate access token invalidation, a token blocklist in Redis can be added later — but for 15 minutes of exposure, the tradeoff is acceptable.
 
+#### Account lockout (M1)
+
+To complement the IP-based rate limiter, failed login attempts are tracked per-account. After 5 failed attempts within 15 minutes, the account is locked for 15 minutes regardless of source IP. This protects against distributed brute force where attackers rotate IPs to evade the per-IP limit.
+
+```
+Server (on failed login):
+  1. Insert row into login_attempts (user_id, ip, failed_at)
+  2. Count failed_at within last 15 minutes
+  3. If count >= 5: return 423 Locked with Retry-After header
+  4. Successful login clears the user's failed attempts
+
+Lockout window: 15 minutes
+Failed-attempt window: 15 minutes
+Threshold: 5
+```
+
+Audit log entries: `auth.login_failed`, `auth.account_locked`, `auth.account_unlocked` (automatic on window expiration).
+
+#### Refresh token reuse detection (M1)
+
+Standard token rotation invalidates the old refresh token on each refresh. But if an attacker steals a refresh token before the legitimate user uses it, both parties hold a "valid" token at that instant. The first one to refresh succeeds; the second one presents a token that has already been rotated.
+
+When the server sees a refresh attempt with a token hash that **was previously valid but has been rotated**, it treats this as a compromise signal:
+
+```
+Server (on rotated-token refresh attempt):
+  1. Delete ALL sessions for the user (invalidate every device)
+  2. Send security alert email: "Your account may have been compromised"
+  3. Audit log: auth.refresh_reuse_detected
+  4. Respond 401 INVALID_CREDENTIALS
+```
+
+This requires retaining rotated `refresh_hash` values for a short window (e.g., 7 days, matching refresh TTL) in a separate `revoked_refresh_tokens` table. Lookups fall through to this table when a refresh fails normally.
+
+#### Multi-factor authentication (TOTP) — M2
+
+Users can enroll a time-based one-time password (TOTP) authenticator app as a second factor. Compatible with any RFC 6238 client (Google Authenticator, Microsoft Authenticator, Authy, 1Password, Bitwarden, Aegis, FreeOTP, etc.) — no vendor lock-in.
+
+**Enrollment**:
+
+```
+POST /api/v1/auth/mfa/enroll
+Authorization: Bearer <jwt>
+
+Server:
+  1. Generate 20 bytes of crypto/rand → base32-encoded secret
+  2. Store encrypted secret in user_mfa_secrets (enabled_at = NULL)
+  3. Generate 10 backup codes (base62, 12 chars each)
+  4. Store SHA-256(backup_code) in user_backup_codes
+  5. Return QR URI + backup codes (raw codes shown ONCE)
+
+Response:
+{
+  "qr_uri": "otpauth://totp/Flagstone:user@example.com?secret=...&issuer=Flagstone&algorithm=SHA1&digits=6&period=30",
+  "backup_codes": ["abc123def456", ...]  // shown once, never again
+}
+```
+
+**Verification (completes enrollment)**:
+
+```
+POST /api/v1/auth/mfa/verify
+{ "code": "123456" }
+
+Server:
+  1. Validate TOTP code against pending secret
+  2. UPDATE user_mfa_secrets SET enabled_at = NOW()
+  3. Audit log: mfa.enabled
+```
+
+**Login with MFA enabled**:
+
+```
+POST /api/v1/auth/login
+{ "email": "...", "password": "..." }
+
+Server (if MFA enrolled):
+  1. Verify password (as usual)
+  2. Generate short-lived mfa_challenge_token (5 min, opaque, stored in mfa_challenges)
+  3. Return 202 Accepted:
+     {
+       "mfa_required": true,
+       "mfa_challenge_token": "..."
+     }
+
+Client → POST /api/v1/auth/mfa/challenge
+{ "mfa_challenge_token": "...", "code": "123456" }
+
+Server:
+  1. Lookup challenge, verify not expired
+  2. Validate TOTP code (or backup code)
+  3. Delete challenge row
+  4. Issue JWT + refresh as usual
+  5. Audit log: mfa.challenge_succeeded
+```
+
+**Backup codes**: when a user enrolls, they receive 10 one-time-use codes. Each can be used in place of a TOTP code if the device is lost. Used codes are marked `used_at` and cannot be reused. A user can regenerate the set (invalidating the old ones) from settings.
+
+**Disabling MFA**: requires current password + current TOTP code. Audit log: `mfa.disabled`.
+
+**Threat coverage**:
+- Mitigates password-only compromise (phishing, breach reuse, weak passwords)
+- Does NOT mitigate real-time phishing (attacker relays the code in <30s) — for that, WebAuthn / passkeys are needed (M3)
+
+**Session management endpoints (M2)**:
+
+```
+GET /api/v1/auth/sessions      → list user's active sessions (device, IP, last_used_at)
+DELETE /api/v1/auth/sessions/:id → revoke one session
+DELETE /api/v1/auth/sessions    → revoke all sessions except current
+```
+
+Lets users see and kill suspicious sessions without waiting for the refresh token to expire.
+
 ---
 
 ## Authorization (RBAC)
@@ -360,6 +474,9 @@ func (s *Store) ListFlags(ctx context.Context, tenantID, projectID uuid.UUID) ([
 | JWT signing | HS256 (HMAC-SHA256) | Single-issuer system — symmetric signing is simpler than RSA/ECDSA. The signing key never leaves the server. |
 | Refresh tokens | 32 bytes crypto/rand | Opaque tokens, stored as SHA-256 hash in DB. Same security model as API keys. |
 | API key generation | crypto/rand | Go's `crypto/rand` reads from `/dev/urandom` on Linux. CSPRNG, suitable for security-critical random values. |
+| TOTP (M2) | HMAC-SHA1, 30s period, 6 digits | RFC 6238 standard. SHA-1 here is fine — the security comes from the secret entropy (160 bits) and the time window, not from collision resistance. Compatible with every standard authenticator app. |
+| MFA backup codes (M2) | 12 chars base62 + SHA-256 | High-entropy one-time codes. Stored as hashes; only shown to user once at enrollment. |
+| MFA secret storage (M2) | AES-256-GCM with key from env var | Encrypted at rest in `user_mfa_secrets.secret_encrypted`. A DB leak without the encryption key does not compromise enrolled secrets. Key lives alongside `JWT_SECRET`. |
 
 ### Why NOT argon2id for passwords?
 
@@ -567,6 +684,11 @@ Internet
 | T16 | **API key in logs/URLs** | Key appears in access logs or query strings | Keys are sent in Authorization header (not URL). Server never logs full key values — only key_prefix. | Mitigated |
 | T17 | **CORS bypass** | Cross-origin requests from malicious sites | CORS whitelist configured per deployment. Dashboard and API on same origin when possible. | Planned (M2) |
 | T18 | **Bootstrap TOCTOU** | Two simultaneous `POST /setup` requests both pass the "no tenants exist" check and create duplicate owner accounts | `INSERT INTO tenants ... WHERE NOT EXISTS (SELECT 1 FROM tenants)` in a single atomic statement. If `rows affected = 0`, return `409 Conflict`. The DB uniqueness constraint on `tenants.slug` is a secondary guard. | Mitigated |
+| T19 | **Distributed credential brute force** | Attacker rotates IPs to evade per-IP rate limit | Per-account lockout: 5 failed attempts in 15 min locks the account for 15 min regardless of IP. | Planned (M1) |
+| T20 | **Refresh token theft (silent)** | Attacker steals refresh cookie via XSS, malware, or browser dump — uses it concurrently with legitimate user | Token reuse detection: presenting a rotated refresh token kills ALL sessions for the user and emits a security alert. The legitimate user is forced to re-authenticate, attacker loses access too. | Planned (M1) |
+| T21 | **Password-only account takeover** | Phishing, password reuse from another breach, weak password guessed | TOTP MFA available as opt-in. RFC 6238 standard — works with Google Authenticator, Authy, 1Password, etc. Backup codes provided. | Planned (M2) |
+| T22 | **Real-time phishing of MFA codes** | Adversary-in-the-middle site captures password + TOTP code and replays within 30s | TOTP does not mitigate this. WebAuthn / passkeys (M3) bind the credential to the origin, defeating relay attacks. | Planned (M3) |
+| T23 | **Compromised password reused from public breach** | Attacker tries known leaked credentials | HaveIBeenPwned k-anonymity check at signup and password reset rejects breached passwords. No password is sent to the external API in plaintext or full hash. | Planned (M2) |
 
 ### Accepted risks
 
@@ -589,8 +711,9 @@ Internet
 | Audit logging | Append-only, DB-enforced immutability | None |
 | Data encryption at rest | EBS + RDS encrypted | None |
 | Data encryption in transit | HTTPS (TLS termination at Caddy/ALB) | Planned (M2) |
-| Password policy | bcrypt, minimum 8 chars | Could add complexity requirements |
-| Session management | JWT 15 min + refresh token rotation | None |
+| Password policy | bcrypt, minimum 8 chars; HIBP breach check (M2) | None after M2 |
+| MFA | TOTP opt-in (M2); WebAuthn (M3); tenant-level enforcement (M3) | None after M2 for opt-in |
+| Session management | JWT 15 min + refresh token rotation + reuse detection (M1) + revoke endpoints (M2) | None after M2 |
 | Change management | All flag changes in audit log with actor, timestamp, diff | None |
 | Incident response | Planned | Need formal runbook |
 
@@ -734,11 +857,13 @@ UNION ALL SELECT 'audit_log', count(*) FROM audit_log;
 - [x] Audit log with DB-enforced immutability
 - [x] Optimistic concurrency control (auto-increment version)
 - [x] Input validation on slugs and keys (DB constraints)
-- [ ] JWT authentication for dashboard
-- [ ] bcrypt password hashing
+- [x] JWT authentication for dashboard
+- [x] bcrypt password hashing
+- [x] RBAC middleware
 - [ ] Rate limiting (in-process token bucket)
 - [ ] JSONB rule validation (depth, size, operator whitelist)
-- [ ] RBAC middleware
+- [ ] Account lockout after repeated failed logins (T19)
+- [ ] Refresh token reuse detection + session-wide invalidation (T20)
 
 ### Milestone 2 — production hardening
 
@@ -748,10 +873,16 @@ UNION ALL SELECT 'audit_log', count(*) FROM audit_log;
 - [ ] Security headers (CSP, HSTS, X-Frame-Options)
 - [ ] Dependency vulnerability scanning (Dependabot / govulncheck)
 - [ ] API key expiration enforcement
+- [ ] TOTP MFA — opt-in per user, RFC 6238 (T21)
+- [ ] Session management endpoints (list / revoke individual sessions)
+- [ ] Login notification emails (new device / IP)
+- [ ] HaveIBeenPwned k-anonymity check on signup and password reset (T23)
 
 ### Milestone 3 — enterprise features
 
 - [ ] SSO / OAuth2 integration (Google, GitHub, SAML)
+- [ ] WebAuthn / passkeys — phishing-resistant MFA (T22)
+- [ ] MFA enforcement at tenant level (admin requires MFA for all members)
 - [ ] IP allowlisting per tenant
 - [ ] AWS Secrets Manager integration
 - [ ] Audit log export (S3, SIEM integration)
