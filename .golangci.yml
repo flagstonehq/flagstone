@@ -3,31 +3,26 @@ version: "2"
 linters:
   default: none
   enable:
-    # --- correctness ---
-    - govet # official go vet checks
-    - errcheck # unhandled errors
-    - staticcheck # SA/S/QF checks (staticcheck.io)
-    - ineffassign # assignments whose result is never used
-    - unused # unused code (vars, funcs, types)
-    - bodyclose # http response body not closed
-    - nilerr # returning nil when error is non-nil (and vice versa)
-    - noctx # http requests without context
-
-    # --- style / idiomatic Go ---
-    - revive # golint successor: naming, style, best practices
-    - gocritic # opinionated checks: appendAssign, sloppyReassign, etc.
-    - misspell # spelling mistakes in comments and strings
-    - whitespace # unnecessary blank lines at start/end of blocks
-
-    # --- security (relevant for a crypto library) ---
-    - gosec # security issues: weak crypto, hardcoded secrets, etc.
+    - govet
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - unused
+    - bodyclose
+    - nilerr
+    - noctx
+    - revive
+    - gocritic
+    - misspell
+    - whitespace
+    - gosec
 
   settings:
     revive:
       rules:
         - name: exported
           arguments:
-            - disableStutteringCheck # allow e.g. ciphersuite.CipherSuite
+            - disableStutteringCheck
         - name: var-naming
         - name: error-return
         - name: error-strings
@@ -37,35 +32,43 @@ linters:
         - name: time-naming
         - name: unexported-return
         - name: unused-parameter
-
     gocritic:
       enabled-tags:
         - diagnostic
         - style
         - performance
       disabled-checks:
-        - hugeParam # false positives on intentional value copies
-        - rangeValCopy # same
-
+        - hugeParam
+        - rangeValCopy
     gosec:
       excludes:
-        - G115 # integer overflow on conversions (too noisy for wire format code)
+        - G115
 
-    godot:
-      scope: declarations # only exported declarations, not all comments
+  exclusions:
+    rules:
+      - path: '_test\.go'
+        linters:
+          - errcheck
+          - gosec
+          - noctx
+      - path: '_test\.go'
+        text: 'httpNoBody'
+        linters:
+          - gocritic
+      - path: '_test\.go'
+        text: 'unused-parameter'
+        linters:
+          - revive
+      - path: '_test\.go'
+        text: 'SA4006'
+        linters:
+          - staticcheck
 
 formatters:
   enable:
-    - gofmt # standard formatter
-    - goimports # gofmt + import grouping
+    - gofmt
+    - goimports
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-rules:
-    # test files get a bit more slack
-    - path: '_test\.go'
-      linters:
-        - errcheck
-        - gosec
-        - godot

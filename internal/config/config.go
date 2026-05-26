@@ -23,15 +23,15 @@ type Config struct {
 	RedisURL string // Redis connection string
 
 	// Auth
-	JWTSecret          string
-	AccessTokenTTL     time.Duration
-	RefreshTokenTTL    time.Duration
-	BcryptCost         int
-	APIKeyRandomBytes  int
+	JWTSecret         string
+	AccessTokenTTL    time.Duration
+	RefreshTokenTTL   time.Duration
+	BcryptCost        int
+	APIKeyRandomBytes int
 
 	// Rate Limiting
-	LoginRateLimit     int // per minute per IP
-	EvaluateRateLimit  int // per minute per API key
+	LoginRateLimit    int // per minute per IP
+	EvaluateRateLimit int // per minute per API key
 
 	// Cache
 	FlagCacheTTL time.Duration

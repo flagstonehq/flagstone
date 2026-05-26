@@ -12,7 +12,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"github.com/thomas-vilte/flagstone/internal/api"
 	"github.com/thomas-vilte/flagstone/internal/config"
+	"github.com/thomas-vilte/flagstone/internal/storage"
 	"go.uber.org/zap"
 )
 
@@ -74,10 +76,14 @@ func main() {
 	redisClient := redis.NewClient(&redis.Options{
 		Addr: redisAddrFromURL(cfg.RedisURL),
 	})
-	defer redisClient.Close()
+	defer redisClient.Close() //nolint:errcheck // shutdown is best-effort
+
+	stores := storage.NewStores(dbPool)
+
+	apiServer := api.NewServer(stores, dbPool, cfg, logger)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, healthResponse{
 			Status:        "ok",
 			Version:       version,
@@ -89,6 +95,8 @@ func main() {
 		resp, status := checkReadiness(r.Context(), dbPool, redisClient)
 		writeJSON(w, status, resp)
 	})
+
+	mux.Handle("/api/v1/", apiServer.Routes())
 
 	srv := &http.Server{
 		Addr:         cfg.Addr,
@@ -102,7 +110,7 @@ func main() {
 		logger.Info("listenig", zap.String("addr", cfg.Addr))
 		if err := srv.ListenAndServe(); err != nil {
 			logger.Error("server error", zap.Error(err))
-			os.Exit(1)
+			os.Exit(1) //nolint:gocritic // exit on unrecoverable server error
 		}
 	}()
 
@@ -113,8 +121,7 @@ func main() {
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Error("forced shutdown", zap.Error(err))
-		os.Exit(1)
+		logger.Fatal("forced shutdown", zap.Error(err))
 	}
 
 	logger.Info("server stopped")
@@ -134,8 +141,8 @@ func redisAddrFromURL(raw string) string {
 	return raw
 }
 
-func checkReadiness(ctx context.Context, dbPool *pgxpool.Pool, redisClient *redis.Client) (readinessResponse, int) {
-	resp := readinessResponse{
+func checkReadiness(ctx context.Context, dbPool *pgxpool.Pool, redisClient *redis.Client) (resp readinessResponse, code int) {
+	resp = readinessResponse{
 		Status: "ready",
 		Checks: map[string]readinessCheck{},
 	}
@@ -169,9 +176,11 @@ func checkReadiness(ctx context.Context, dbPool *pgxpool.Pool, redisClient *redi
 		}
 	}
 	if resp.Checks["postgres"].Status != "up" {
-		return resp, http.StatusServiceUnavailable
+		code = http.StatusServiceUnavailable
+		return
 	}
-	return resp, http.StatusOK
+	code = http.StatusOK
+	return
 }
 
 func connectPostgresWithRetry(ctx context.Context, databaseURL string, logger *zap.Logger) (*pgxpool.Pool, error) {
