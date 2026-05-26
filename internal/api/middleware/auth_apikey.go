@@ -38,11 +38,11 @@ func AuthAPIKey(stores *storage.Stores) func(http.Handler) http.Handler {
 				return
 			}
 
-			go func(id uuid.UUID, usedAt time.Time) {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			go func(id uuid.UUID, usedAt time.Time, parent context.Context) {
+				ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 				defer cancel()
 				_ = stores.APIKeys.UpdateLastUsed(ctx, id, usedAt)
-			}(key.ID, now)
+			}(key.ID, now, r.Context())
 
 			ctx := WithEnvironmentID(r.Context(), key.EnvironmentID)
 			next.ServeHTTP(w, r.WithContext(ctx))
