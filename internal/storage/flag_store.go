@@ -10,18 +10,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // FlagStore handles persistence and retrieval of flags.
 type FlagStore struct {
-	pool *pgxpool.Pool
+	db Querier
 }
 
 // NewFlagStore creates a new FlagStore backed by the given connection pool.
-func NewFlagStore(pool *pgxpool.Pool) *FlagStore {
+func NewFlagStore(db Querier) *FlagStore {
 	return &FlagStore{
-		pool: pool,
+		db: db,
 	}
 }
 
@@ -48,7 +47,7 @@ func (s *FlagStore) Create(ctx context.Context, flag *Flag) error {
 	}
 	flag.Key = strings.TrimSpace(flag.Key)
 	flag.Name = strings.TrimSpace(flag.Name)
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		flag.ID,
@@ -99,7 +98,7 @@ func (s *FlagStore) GetByKey(ctx context.Context, projectID uuid.UUID, key strin
 		createdBy   uuid.NullUUID
 	)
 
-	if err := s.pool.QueryRow(ctx, query, projectID, strings.TrimSpace(key)).Scan(
+	if err := s.db.QueryRow(ctx, query, projectID, strings.TrimSpace(key)).Scan(
 		&flag.ID,
 		&flag.ProjectID,
 		&flag.Key,
@@ -145,7 +144,7 @@ func (s *FlagStore) ListByProject(ctx context.Context, projectID uuid.UUID) ([]F
 		  AND archived_at IS NULL
 		ORDER BY created_at ASC
 	`
-	rows, err := s.pool.Query(ctx, query, projectID)
+	rows, err := s.db.Query(ctx, query, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("storage.FlagStore.ListByProject: %w", err)
 	}
@@ -197,7 +196,7 @@ func (s *FlagStore) Update(ctx context.Context, flag *Flag) error {
 	`
 	flag.Key = strings.TrimSpace(flag.Key)
 	flag.Name = strings.TrimSpace(flag.Name)
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		flag.ID,
@@ -228,7 +227,7 @@ func (s *FlagStore) Archive(ctx context.Context, id uuid.UUID, archivedAt time.T
 		WHERE id = $1
 		  AND archived_at IS NULL
 	`
-	tag, err := s.pool.Exec(ctx, query, id, archivedAt)
+	tag, err := s.db.Exec(ctx, query, id, archivedAt)
 	if err != nil {
 		return fmt.Errorf("storage.FlagStore.Archive: %w", err)
 	}

@@ -125,6 +125,26 @@ type Segment struct {
 	CreatedBy   *uuid.UUID
 }
 
+// LoginAttempt records a single failed login. The row is consulted to
+// enforce account lockout (T19) and wiped when the user logs in successfully.
+type LoginAttempt struct {
+	ID          uuid.UUID
+	UserID      uuid.UUID
+	IPAddress   *net.IP
+	UserAgent   *string
+	AttemptedAt time.Time
+}
+
+// RevokedRefreshToken records a refresh-token hash that must never be
+// honored again. Used to detect replayed refresh tokens (T20).
+type RevokedRefreshToken struct {
+	ID        uuid.UUID
+	TokenHash string
+	UserID    uuid.UUID
+	RevokedAt time.Time
+	ExpiresAt time.Time
+}
+
 // AuditLogEntry records an immutable system action for forensic auditing.
 type AuditLogEntry struct {
 	ID           uuid.UUID

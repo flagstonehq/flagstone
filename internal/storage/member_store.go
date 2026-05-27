@@ -7,18 +7,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // MemberStore handles tenant membership persistence and role management.
 type MemberStore struct {
-	pool *pgxpool.Pool
+	db Querier
 }
 
 // NewMemberStore creates a new MemberStore backed by the given connection pool.
-func NewMemberStore(pool *pgxpool.Pool) *MemberStore {
+func NewMemberStore(db Querier) *MemberStore {
 	return &MemberStore{
-		pool: pool,
+		db: db,
 	}
 }
 
@@ -31,7 +30,7 @@ func (s *MemberStore) Add(ctx context.Context, member *TenantMember) error {
 		RETURNING created_at
 	`
 
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		member.TenantID,
@@ -58,7 +57,7 @@ func (s *MemberStore) GetRole(ctx context.Context, tenantID, userID uuid.UUID) (
 	`
 
 	var role string
-	if err := s.pool.QueryRow(ctx, query, tenantID, userID).Scan(&role); err != nil {
+	if err := s.db.QueryRow(ctx, query, tenantID, userID).Scan(&role); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrNotFound
 		}
@@ -77,7 +76,7 @@ func (s *MemberStore) ListByTenant(ctx context.Context, tenantID uuid.UUID) ([]T
 		ORDER BY created_at ASC
 	`
 
-	rows, err := s.pool.Query(ctx, query, tenantID)
+	rows, err := s.db.Query(ctx, query, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("storage.MemberStore.ListByTenant: %w", err)
 	}
@@ -113,7 +112,7 @@ func (s *MemberStore) UpdateRole(ctx context.Context, tenantID, userID uuid.UUID
 		WHERE tenant_id = $1 AND user_id = $2
 	`
 
-	tag, err := s.pool.Exec(ctx, query, tenantID, userID, role)
+	tag, err := s.db.Exec(ctx, query, tenantID, userID, role)
 	if err != nil {
 		return fmt.Errorf("storage.MemberStore.UpdateRole: %w", err)
 	}
@@ -132,7 +131,7 @@ func (s *MemberStore) Remove(ctx context.Context, tenantID, userID uuid.UUID) er
 		WHERE tenant_id = $1 AND user_id = $2
 	`
 
-	tag, err := s.pool.Exec(ctx, query, tenantID, userID)
+	tag, err := s.db.Exec(ctx, query, tenantID, userID)
 	if err != nil {
 		return fmt.Errorf("storage.MemberStore.Remove: %w", err)
 	}
@@ -152,7 +151,7 @@ func (s *MemberStore) ListByUser(ctx context.Context, userID uuid.UUID) ([]Tenan
 	ORDER BY created_at ASC
 	`
 
-	rows, err := s.pool.Query(ctx, query, userID)
+	rows, err := s.db.Query(ctx, query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("storage.MemberStore.ListByUser: %w", err)
 	}

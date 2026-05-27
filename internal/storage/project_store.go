@@ -8,18 +8,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ProjectStore handles persistence and retrieval of projects.
 type ProjectStore struct {
-	pool *pgxpool.Pool
+	db Querier
 }
 
 // NewProjectStore creates a new ProjectStore backed by the given connection pool.
-func NewProjectStore(pool *pgxpool.Pool) *ProjectStore {
+func NewProjectStore(db Querier) *ProjectStore {
 	return &ProjectStore{
-		pool: pool,
+		db: db,
 	}
 }
 
@@ -39,7 +38,7 @@ func (s *ProjectStore) Create(ctx context.Context, project *Project) error {
 	project.Slug = strings.TrimSpace(project.Slug)
 	project.Name = strings.TrimSpace(project.Name)
 
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		project.ID,
@@ -67,7 +66,7 @@ func (s *ProjectStore) GetBySlug(ctx context.Context, tenantID uuid.UUID, slug s
 	`
 
 	var project Project
-	if err := s.pool.QueryRow(ctx, query, tenantID, strings.TrimSpace(slug)).Scan(
+	if err := s.db.QueryRow(ctx, query, tenantID, strings.TrimSpace(slug)).Scan(
 		&project.ID,
 		&project.TenantID,
 		&project.Slug,
@@ -93,7 +92,7 @@ func (s *ProjectStore) ListByTenant(ctx context.Context, tenantID uuid.UUID) ([]
 	  ORDER BY created_at ASC
 	`
 
-	rows, err := s.pool.Query(ctx, query, tenantID)
+	rows, err := s.db.Query(ctx, query, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("storage.ProjectStore.ListByTenant: %w", err)
 	}
@@ -135,7 +134,7 @@ func (s *ProjectStore) Update(ctx context.Context, project *Project) error {
 	project.Slug = strings.TrimSpace(project.Slug)
 	project.Name = strings.TrimSpace(project.Name)
 
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		project.ID,

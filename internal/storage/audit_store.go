@@ -7,18 +7,17 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // AuditStore handles append-only audit log writes and tenant-scoped queries.
 type AuditStore struct {
-	pool *pgxpool.Pool
+	db Querier
 }
 
 // NewAuditStore creates a new AuditStore backed by the given connection pool.
-func NewAuditStore(pool *pgxpool.Pool) *AuditStore {
+func NewAuditStore(db Querier) *AuditStore {
 	return &AuditStore{
-		pool: pool,
+		db: db,
 	}
 }
 
@@ -47,7 +46,7 @@ func (s *AuditStore) Insert(ctx context.Context, entry *AuditLogEntry) error {
 	if entry.IPAddress != nil {
 		ip = *entry.IPAddress
 	}
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		entry.ID,
@@ -131,10 +130,10 @@ func (s *AuditStore) Query(ctx context.Context, filter AuditLogFilter) (*AuditLo
 		filter.Until,
 	}
 	var total int64
-	if err := s.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+	if err := s.db.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("storage.AuditStore.Query: count: %w", err)
 	}
-	rows, err := s.pool.Query(ctx, listQuery, append(args, limit, offset)...)
+	rows, err := s.db.Query(ctx, listQuery, append(args, limit, offset)...)
 	if err != nil {
 		return nil, fmt.Errorf("storage.AuditStore.Query: list: %w", err)
 	}

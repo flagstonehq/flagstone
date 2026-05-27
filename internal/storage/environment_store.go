@@ -8,18 +8,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // EnvironmentStore handles persistence and retrieval of environments.
 type EnvironmentStore struct {
-	pool *pgxpool.Pool
+	db Querier
 }
 
 // NewEnvironmentStore creates a new EnvironmentStore backed by the given connection pool.
-func NewEnvironmentStore(pool *pgxpool.Pool) *EnvironmentStore {
+func NewEnvironmentStore(db Querier) *EnvironmentStore {
 	return &EnvironmentStore{
-		pool: pool,
+		db: db,
 	}
 }
 
@@ -39,7 +38,7 @@ func (s *EnvironmentStore) Create(ctx context.Context, environment *Environment)
 	environment.Slug = strings.TrimSpace(environment.Slug)
 	environment.Name = strings.TrimSpace(environment.Name)
 
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		environment.ID,
@@ -66,7 +65,7 @@ func (s *EnvironmentStore) GetByID(ctx context.Context, id uuid.UUID) (*Environm
 		WHERE id = $1
 	`
 	var environment Environment
-	if err := s.pool.QueryRow(ctx, query, id).Scan(
+	if err := s.db.QueryRow(ctx, query, id).Scan(
 		&environment.ID,
 		&environment.ProjectID,
 		&environment.Slug,
@@ -91,7 +90,7 @@ func (s *EnvironmentStore) GetBySlug(ctx context.Context, projectID uuid.UUID, s
 		WHERE project_id = $1 AND slug = $2
 	`
 	var environment Environment
-	if err := s.pool.QueryRow(ctx, query, projectID, strings.TrimSpace(slug)).Scan(
+	if err := s.db.QueryRow(ctx, query, projectID, strings.TrimSpace(slug)).Scan(
 		&environment.ID,
 		&environment.ProjectID,
 		&environment.Slug,
@@ -115,7 +114,7 @@ func (s *EnvironmentStore) ListByProject(ctx context.Context, projectID uuid.UUI
 		WHERE project_id = $1
 		ORDER BY created_at ASC
 	`
-	rows, err := s.pool.Query(ctx, query, projectID)
+	rows, err := s.db.Query(ctx, query, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("storage.EnvironmentStore.ListByProject: %w", err)
 	}

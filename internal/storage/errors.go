@@ -15,4 +15,5 @@ var (
 	ErrFlagNotFound        = errors.New("storage: flag not found")
 	ErrFlagArchived        = errors.New("storage: flag archived")
 	ErrSegmentNotFound     = errors.New("storage: segment not found")
+	ErrAccountLocked       = errors.New("storage: account locked")
 )

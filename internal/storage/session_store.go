@@ -9,18 +9,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // SessionStore handles persistence and retrieval of refresh-token sessions.
 type SessionStore struct {
-	pool *pgxpool.Pool
+	db Querier
 }
 
 // NewSessionStore creates a new SessionStore backed by the given connection pool.
-func NewSessionStore(pool *pgxpool.Pool) *SessionStore {
+func NewSessionStore(db Querier) *SessionStore {
 	return &SessionStore{
-		pool: pool,
+		db: db,
 	}
 }
 
@@ -41,7 +40,7 @@ func (s *SessionStore) Create(ctx context.Context, session *Session) error {
 		ip = *session.IPAddress
 	}
 
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		session.ID,
@@ -75,7 +74,7 @@ func (s *SessionStore) GetByRefreshHash(ctx context.Context, refreshHash string)
 		userAgent sql.NullString
 		ipText    sql.NullString
 	)
-	if err := s.pool.QueryRow(ctx, query, refreshHash).Scan(
+	if err := s.db.QueryRow(ctx, query, refreshHash).Scan(
 		&session.ID,
 		&session.UserID,
 		&session.TenantID,
@@ -103,7 +102,7 @@ func (s *SessionStore) DeleteByID(ctx context.Context, id uuid.UUID) error {
 	 WHERE id = $1
 	`
 
-	tag, err := s.pool.Exec(ctx, query, id)
+	tag, err := s.db.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("storage.SessionStore.DeleteByID: %w", err)
 	}
@@ -121,7 +120,7 @@ func (s *SessionStore) DeleteByUserID(ctx context.Context, userID uuid.UUID) err
 		DELETE FROM sessions
 		WHERE user_id = $1
 	`
-	if _, err := s.pool.Exec(ctx, query, userID); err != nil {
+	if _, err := s.db.Exec(ctx, query, userID); err != nil {
 		return fmt.Errorf("storage.SessionStore.DeleteByUserID: %w", err)
 	}
 	return nil
@@ -134,7 +133,7 @@ func (s *SessionStore) DeleteExpired(ctx context.Context) (int64, error) {
 		WHERE expires_at < NOW()
 	`
 
-	tag, err := s.pool.Exec(ctx, query)
+	tag, err := s.db.Exec(ctx, query)
 	if err != nil {
 		return 0, fmt.Errorf("storage.SessionStore.DeleteExpired: %w", err)
 	}
