@@ -5,6 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/thomas-vilte/flagstone/internal/api/middleware"
+	"github.com/thomas-vilte/flagstone/internal/auth"
 	"github.com/thomas-vilte/flagstone/internal/config"
 	"github.com/thomas-vilte/flagstone/internal/storage"
 	"go.uber.org/zap"
@@ -16,15 +17,25 @@ type Server struct {
 	dbPool *pgxpool.Pool
 	cfg    *config.Config
 	logger *zap.Logger
+
+	// fakePasswordHash is a precomputed bcrypt hash used to keep login
+	// response times constant when the email isn't found in the DB. Without
+	// it, the absence of a bcrypt comparison would leak which emails exist.
+	fakePasswordHash string
 }
 
 // NewServer creates a new API Server with the given dependencies.
 func NewServer(stores *storage.Stores, dbPool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) *Server {
+	fake, err := auth.HashPassword("flagstone-timing-decoy", cfg.BcryptCost)
+	if err != nil {
+		logger.Warn("could not precompute fake password hash; login timing oracle defense disabled", zap.Error(err))
+	}
 	return &Server{
-		stores: stores,
-		dbPool: dbPool,
-		cfg:    cfg,
-		logger: logger,
+		stores:           stores,
+		dbPool:           dbPool,
+		cfg:              cfg,
+		logger:           logger,
+		fakePasswordHash: fake,
 	}
 }
 
