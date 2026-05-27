@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -11,15 +12,22 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/thomas-vilte/flagstone/internal/api/middleware"
 	"github.com/thomas-vilte/flagstone/internal/auth"
 	"github.com/thomas-vilte/flagstone/internal/storage"
 	"go.uber.org/zap"
 )
 
+const (
+	maxFailedLoginAttempts = 5
+	loginLockoutWindow     = 15 * time.Minute
+)
+
 type loginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email      string `json:"email"`
+	Password   string `json:"password"`
+	TenantSlug string `json:"tenant_slug,omitempty"`
 }
 
 type tokenResponse struct {
@@ -28,7 +36,18 @@ type tokenResponse struct {
 	ExpiresIn   int64  `json:"expires_in"`
 }
 
-var errMultipleTenants = errors.New("multiple tenants for user")
+// tenantSummary is the public shape of a tenant returned to the client
+// when they need to disambiguate between memberships.
+type tenantSummary struct {
+	ID   uuid.UUID `json:"id"`
+	Slug string    `json:"slug"`
+	Name string    `json:"name"`
+}
+
+var (
+	errMultipleTenants = errors.New("multiple tenants for user")
+	errTenantMismatch  = errors.New("user is not a member of the requested tenant")
+)
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
@@ -42,9 +61,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := s.stores.Users.GetByEmail(r.Context(), req.Email)
+	ctx := r.Context()
+
+	user, err := s.stores.Users.GetByEmail(ctx, req.Email)
 	if err != nil {
 		if errors.Is(err, storage.ErrUserNotFound) {
+			_ = auth.VerifyPassword(s.fakePasswordHash, req.Password)
 			middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password.")
 			return
 		}
@@ -53,23 +75,41 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	count, err := s.stores.LoginAttempts.CountSince(ctx, user.ID, time.Now().UTC().Add(-loginLockoutWindow))
+	if err != nil {
+		s.logger.Error("login: count attempts", zap.Error(err))
+		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		return
+	}
+	if count >= maxFailedLoginAttempts {
+		middleware.Error(w, r, http.StatusLocked, "ACCOUNT_LOCKED", "Account temporarily locked due to too many failed attempts. Try again later.")
+		return
+	}
+
 	if user.PasswordHash == nil || auth.VerifyPassword(*user.PasswordHash, req.Password) != nil {
+		s.recordFailedLogin(ctx, user.ID, r)
 		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password.")
 		return
 	}
 
-	tenantID, role, err := s.resolveUserTenant(r.Context(), user.ID)
+	tenantID, role, err := s.resolveUserTenant(ctx, user.ID, req.TenantSlug)
 	if err != nil {
 		switch {
 		case errors.Is(err, errMultipleTenants):
-			middleware.Error(w, r, http.StatusConflict, "MULTIPLE_TENANTS", "User belongs to multiple tenants.")
-		case errors.Is(err, storage.ErrNotFound):
+			s.writeMultipleTenants(ctx, w, r, user.ID)
+		case errors.Is(err, errTenantMismatch),
+			errors.Is(err, storage.ErrTenantNotFound),
+			errors.Is(err, storage.ErrNotFound):
 			middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password.")
 		default:
 			s.logger.Error("login: resolve tenant", zap.Error(err))
 			middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		}
 		return
+	}
+
+	if err := s.stores.LoginAttempts.ClearForUser(ctx, user.ID); err != nil {
+		s.logger.Warn("login: clear attempts", zap.Error(err))
 	}
 
 	accessToken, err := auth.GenerateAccessToken(user.ID, tenantID, role, s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
@@ -96,17 +136,17 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:   now.Add(s.cfg.RefreshTokenTTL),
 	}
 
-	if err := s.stores.Sessions.Create(r.Context(), session); err != nil {
+	if err := s.stores.Sessions.Create(ctx, session); err != nil {
 		s.logger.Error("login: create session", zap.Error(err))
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		return
 	}
 
-	if err := s.stores.Users.UpdateLastLogin(r.Context(), user.ID, now); err != nil {
+	if err := s.stores.Users.UpdateLastLogin(ctx, user.ID, now); err != nil {
 		s.logger.Error("login: update last login", zap.Error(err))
 	}
 
-	if err := s.stores.AuditLogs.Insert(r.Context(), &storage.AuditLogEntry{
+	if err := s.stores.AuditLogs.Insert(ctx, &storage.AuditLogEntry{
 		TenantID:     tenantID,
 		ActorID:      uuidPtr(user.ID),
 		ActorType:    "user",
@@ -134,8 +174,19 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
 	refreshHash := auth.HashRefreshToken(cookie.Value)
-	session, err := s.stores.Sessions.GetByRefreshHash(r.Context(), refreshHash)
+
+	if revoked, err := s.stores.RevokedTokens.Lookup(ctx, refreshHash); err == nil {
+		s.handleRefreshReuse(ctx, w, r, revoked)
+		return
+	} else if !errors.Is(err, storage.ErrNotFound) {
+		s.logger.Error("refresh: revoked lookup", zap.Error(err))
+		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		return
+	}
+
+	session, err := s.stores.Sessions.GetByRefreshHash(ctx, refreshHash)
 	if err != nil {
 		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid or expired refresh token.")
 		return
@@ -143,24 +194,19 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC()
 	if !session.ExpiresAt.After(now) {
-		_ = s.stores.Sessions.DeleteByID(r.Context(), session.ID)
+		_ = s.stores.Sessions.DeleteByID(ctx, session.ID)
 		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid or expired refresh token.")
 		return
 	}
 
-	user, err := s.stores.Users.GetByID(r.Context(), session.UserID)
+	user, err := s.stores.Users.GetByID(ctx, session.UserID)
 	if err != nil {
 		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid or expired refresh token.")
 		return
 	}
 
-	role, err := s.stores.Members.GetRole(r.Context(), session.TenantID, session.UserID)
+	role, err := s.stores.Members.GetRole(ctx, session.TenantID, session.UserID)
 	if err != nil {
-		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid or expired refresh token.")
-		return
-	}
-
-	if err := s.stores.Sessions.DeleteByID(r.Context(), session.ID); err != nil {
 		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid or expired refresh token.")
 		return
 	}
@@ -181,8 +227,23 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:   now.Add(s.cfg.RefreshTokenTTL),
 	}
 
-	if err := s.stores.Sessions.Create(r.Context(), newSession); err != nil {
-		s.logger.Error("refresh: create session", zap.Error(err))
+	if err := s.runInTx(ctx, func(txStores *storage.Stores) error {
+		if err := txStores.RevokedTokens.Insert(ctx, &storage.RevokedRefreshToken{
+			TokenHash: refreshHash,
+			UserID:    user.ID,
+			ExpiresAt: session.ExpiresAt,
+		}); err != nil {
+			return fmt.Errorf("revoke old token: %w", err)
+		}
+		if err := txStores.Sessions.DeleteByID(ctx, session.ID); err != nil {
+			return fmt.Errorf("delete old session: %w", err)
+		}
+		if err := txStores.Sessions.Create(ctx, newSession); err != nil {
+			return fmt.Errorf("create new session: %w", err)
+		}
+		return nil
+	}); err != nil {
+		s.logger.Error("refresh: rotate", zap.Error(err))
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		return
 	}
@@ -194,7 +255,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.stores.AuditLogs.Insert(r.Context(), &storage.AuditLogEntry{
+	if err := s.stores.AuditLogs.Insert(ctx, &storage.AuditLogEntry{
 		TenantID:     session.TenantID,
 		ActorID:      uuidPtr(user.ID),
 		ActorType:    "user",
@@ -231,13 +292,25 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Authentication is required.")
 		return
 	}
+
+	ctx := r.Context()
 	if cookie, err := r.Cookie("refresh_token"); err == nil && strings.TrimSpace(cookie.Value) != "" {
 		refreshHash := auth.HashRefreshToken(cookie.Value)
-		if session, err := s.stores.Sessions.GetByRefreshHash(r.Context(), refreshHash); err == nil {
-			_ = s.stores.Sessions.DeleteByID(r.Context(), session.ID)
+		if session, err := s.stores.Sessions.GetByRefreshHash(ctx, refreshHash); err == nil {
+			_ = s.runInTx(ctx, func(txStores *storage.Stores) error {
+				if err := txStores.RevokedTokens.Insert(ctx, &storage.RevokedRefreshToken{
+					TokenHash: refreshHash,
+					UserID:    session.UserID,
+					ExpiresAt: session.ExpiresAt,
+				}); err != nil {
+					return err
+				}
+				return txStores.Sessions.DeleteByID(ctx, session.ID)
+			})
 		}
 	}
-	if err := s.stores.AuditLogs.Insert(r.Context(), &storage.AuditLogEntry{
+
+	if err := s.stores.AuditLogs.Insert(ctx, &storage.AuditLogEntry{
 		TenantID:     tenantID,
 		ActorID:      uuidPtr(userID),
 		ActorType:    "user",
@@ -251,6 +324,39 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	s.clearRefreshCookie(w)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleRefreshReuse responds to a replayed refresh token. We kill every
+// session for the user and audit it so an operator can investigate.
+func (s *Server) handleRefreshReuse(ctx context.Context, w http.ResponseWriter, r *http.Request, revoked *storage.RevokedRefreshToken) {
+	if err := s.stores.Sessions.DeleteByUserID(ctx, revoked.UserID); err != nil {
+		s.logger.Error("refresh reuse: delete sessions", zap.Error(err))
+	}
+	if err := s.stores.AuditLogs.Insert(ctx, &storage.AuditLogEntry{
+		ActorID:      uuidPtr(revoked.UserID),
+		ActorType:    "user",
+		Action:       "auth.refresh_reuse",
+		ResourceType: "user",
+		ResourceID:   uuidPtr(revoked.UserID),
+		IPAddress:    requestIP(r),
+		UserAgent:    stringPtr(strings.TrimSpace(r.UserAgent())),
+	}); err != nil {
+		s.logger.Error("refresh reuse: audit log", zap.Error(err))
+	}
+	s.logger.Warn("refresh token reuse detected", zap.String("user_id", revoked.UserID.String()))
+	s.clearRefreshCookie(w)
+	middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid or expired refresh token.")
+}
+
+func (s *Server) recordFailedLogin(ctx context.Context, userID uuid.UUID, r *http.Request) {
+	err := s.stores.LoginAttempts.Record(ctx, &storage.LoginAttempt{
+		UserID:    userID,
+		IPAddress: requestIP(r),
+		UserAgent: stringPtr(strings.TrimSpace(r.UserAgent())),
+	})
+	if err != nil {
+		s.logger.Warn("login: record attempt", zap.Error(err))
+	}
 }
 
 func validateLogin(req *loginRequest) error {
@@ -312,20 +418,107 @@ func (s *Server) clearRefreshCookie(w http.ResponseWriter) {
 	})
 }
 
-func (s *Server) resolveUserTenant(ctx context.Context, userID uuid.UUID) (uuid.UUID, string, error) {
+// resolveUserTenant picks the tenant for the login. The flow is:
+//
+//   - tenantSlug != "": find the tenant, then verify the user is a member.
+//     Mismatches fall back to INVALID_CREDENTIALS so we don't leak which
+//     tenants exist.
+//
+//   - tenantSlug == "" and the user has exactly one tenant: use it.
+//
+//   - tenantSlug == "" and the user has many tenants: surface
+//     errMultipleTenants so the caller can prompt for a slug.
+func (s *Server) resolveUserTenant(ctx context.Context, userID uuid.UUID, tenantSlug string) (uuid.UUID, string, error) {
+	tenantSlug = strings.TrimSpace(tenantSlug)
+	if tenantSlug != "" {
+		tenant, err := s.stores.Tenants.GetBySlug(ctx, tenantSlug)
+		if err != nil {
+			return uuid.Nil, "", err
+		}
+		role, err := s.stores.Members.GetRole(ctx, tenant.ID, userID)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				return uuid.Nil, "", errTenantMismatch
+			}
+			return uuid.Nil, "", err
+		}
+		return tenant.ID, role, nil
+	}
+
 	members, err := s.stores.Members.ListByUser(ctx, userID)
 	if err != nil {
 		return uuid.Nil, "", err
 	}
-
 	if len(members) == 0 {
 		return uuid.Nil, "", storage.ErrNotFound
 	}
-
 	if len(members) > 1 {
 		return uuid.Nil, "", errMultipleTenants
 	}
 	return members[0].TenantID, members[0].Role, nil
+}
+
+// writeMultipleTenants returns a 409 listing the tenants the user could
+// pick from. The client retries the login including tenant_slug.
+func (s *Server) writeMultipleTenants(ctx context.Context, w http.ResponseWriter, r *http.Request, userID uuid.UUID) {
+	members, err := s.stores.Members.ListByUser(ctx, userID)
+	if err != nil {
+		s.logger.Error("login: list memberships", zap.Error(err))
+		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		return
+	}
+
+	summaries := make([]tenantSummary, 0, len(members))
+	for _, m := range members {
+		tenant, err := s.stores.Tenants.GetByID(ctx, m.TenantID)
+		if err != nil {
+			s.logger.Warn("login: fetch tenant for multi-tenant response",
+				zap.String("tenant_id", m.TenantID.String()), zap.Error(err))
+			continue
+		}
+		summaries = append(summaries, tenantSummary{
+			ID:   tenant.ID,
+			Slug: tenant.Slug,
+			Name: tenant.Name,
+		})
+	}
+
+	reqID := middleware.RequestIDFromContext(r.Context())
+	payload := struct {
+		Error struct {
+			Code             string          `json:"code"`
+			Message          string          `json:"message"`
+			RequestID        string          `json:"request_id,omitempty"`
+			AvailableTenants []tenantSummary `json:"available_tenants"`
+		} `json:"error"`
+	}{}
+	payload.Error.Code = "MULTIPLE_TENANTS"
+	payload.Error.Message = "User belongs to multiple tenants. Retry with tenant_slug."
+	payload.Error.RequestID = reqID
+	payload.Error.AvailableTenants = summaries
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+// runInTx executes fn inside a serializable-isolation transaction. The
+// stores fn receives all run inside that tx, so any failure rolls back
+// every write together.
+func (s *Server) runInTx(ctx context.Context, fn func(txStores *storage.Stores) error) error {
+	tx, err := s.stores.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := fn(s.stores.WithTx(tx)); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
 }
 
 func requestIP(r *http.Request) *net.IP {
