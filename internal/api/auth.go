@@ -47,6 +47,7 @@ type tenantSummary struct {
 var (
 	errMultipleTenants = errors.New("multiple tenants for user")
 	errTenantMismatch  = errors.New("user is not a member of the requested tenant")
+	errNoTenantAccess  = errors.New("user has no tenant access")
 )
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +98,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, errMultipleTenants):
 			s.writeMultipleTenants(ctx, w, r, user.ID)
-		case errors.Is(err, errTenantMismatch),
+		case errors.Is(err, errNoTenantAccess),
+			errors.Is(err, errTenantMismatch),
 			errors.Is(err, storage.ErrTenantNotFound),
 			errors.Is(err, storage.ErrNotFound):
 			middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password.")
@@ -450,7 +452,7 @@ func (s *Server) resolveUserTenant(ctx context.Context, userID uuid.UUID, tenant
 		return uuid.Nil, "", err
 	}
 	if len(members) == 0 {
-		return uuid.Nil, "", storage.ErrNotFound
+		return uuid.Nil, "", errNoTenantAccess
 	}
 	if len(members) > 1 {
 		return uuid.Nil, "", errMultipleTenants
