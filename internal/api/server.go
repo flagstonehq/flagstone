@@ -43,6 +43,30 @@ func (s *Server) Routes() http.Handler {
 	)
 	mux.Handle("POST /api/v1/setup", recoverMW(setupHandler))
 
+	loginHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleLogin),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+	)
+	mux.Handle("POST /api/v1/auth/login", recoverMW(loginHandler))
+
+	refreshHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleRefresh),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+	)
+	mux.Handle("POST /api/v1/auth/refresh", recoverMW(refreshHandler))
+
+	logoutHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleLogout),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+	)
+	mux.Handle("POST /api/v1/auth/logout", recoverMW(logoutHandler))
+
 	return mux
 }
 
