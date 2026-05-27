@@ -10,18 +10,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // UserStore handles persistence and retrieval of users.
 type UserStore struct {
-	pool *pgxpool.Pool
+	db Querier
 }
 
 // NewUserStore creates a new UserStore backed by the given connection pool.
-func NewUserStore(pool *pgxpool.Pool) *UserStore {
+func NewUserStore(db Querier) *UserStore {
 	return &UserStore{
-		pool: pool,
+		db: db,
 	}
 }
 
@@ -40,7 +39,7 @@ func (s *UserStore) Create(ctx context.Context, user *User) error {
 
 	user.Email = strings.TrimSpace(user.Email)
 
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		user.ID,
@@ -76,7 +75,7 @@ func (s *UserStore) GetByID(ctx context.Context, id uuid.UUID) (*User, error) {
 		lastLoginAt     sql.NullTime
 	)
 
-	if err := s.pool.QueryRow(ctx, query, id).Scan(
+	if err := s.db.QueryRow(ctx, query, id).Scan(
 		&user.ID,
 		&user.Email,
 		&passwordHash,
@@ -112,7 +111,7 @@ func (s *UserStore) GetByEmail(ctx context.Context, email string) (*User, error)
 		emailVerifiedAt sql.NullTime
 		lastLoginAt     sql.NullTime
 	)
-	if err := s.pool.QueryRow(ctx, query, strings.TrimSpace(email)).Scan(
+	if err := s.db.QueryRow(ctx, query, strings.TrimSpace(email)).Scan(
 		&user.ID,
 		&user.Email,
 		&passwordHash,
@@ -141,7 +140,7 @@ func (s *UserStore) UpdateLastLogin(ctx context.Context, userID uuid.UUID, at ti
 		WHERE id = $1
 	`
 
-	tag, err := s.pool.Exec(ctx, query, userID, at)
+	tag, err := s.db.Exec(ctx, query, userID, at)
 	if err != nil {
 		return fmt.Errorf("storage.UserStore.UpdateLastLogin: %w", err)
 	}
@@ -161,7 +160,7 @@ func (s *UserStore) UpdatePasswordHash(ctx context.Context, userID uuid.UUID, pa
 			WHERE id = $1
 	`
 
-	tag, err := s.pool.Exec(ctx, query, userID, passwordHash)
+	tag, err := s.db.Exec(ctx, query, userID, passwordHash)
 	if err != nil {
 		return fmt.Errorf("storage.UserStore.UpdatePasswordHash: %w", err)
 	}
@@ -181,7 +180,7 @@ func (s *UserStore) VerifyEmail(ctx context.Context, userID uuid.UUID, at time.T
 		WHERE id = $1
 	`
 
-	tag, err := s.pool.Exec(ctx, query, userID, at)
+	tag, err := s.db.Exec(ctx, query, userID, at)
 	if err != nil {
 		return fmt.Errorf("storage.UserStore.VerifyEmail: %w", err)
 	}

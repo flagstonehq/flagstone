@@ -9,18 +9,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // APIKeyStore handles persistence and retrieval of API keys.
 type APIKeyStore struct {
-	pool *pgxpool.Pool
+	db Querier
 }
 
 // NewAPIKeyStore creates a new APIKeyStore backed by the given connection pool.
-func NewAPIKeyStore(pool *pgxpool.Pool) *APIKeyStore {
+func NewAPIKeyStore(db Querier) *APIKeyStore {
 	return &APIKeyStore{
-		pool: pool,
+		db: db,
 	}
 }
 
@@ -47,7 +46,7 @@ func (s *APIKeyStore) Create(ctx context.Context, key *APIKey) error {
 		key.ID = uuid.New()
 	}
 
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		key.ID,
@@ -98,7 +97,7 @@ func (s *APIKeyStore) GetByHash(ctx context.Context, keyHash string) (*APIKey, e
 		createdBy  uuid.NullUUID
 	)
 
-	if err := s.pool.QueryRow(ctx, query, keyHash).Scan(
+	if err := s.db.QueryRow(ctx, query, keyHash).Scan(
 		&key.ID,
 		&key.EnvironmentID,
 		&key.Name,
@@ -143,7 +142,7 @@ func (s *APIKeyStore) ListByEnvironment(ctx context.Context, environmentID uuid.
 			ORDER BY created_at ASC
 		`
 
-	rows, err := s.pool.Query(ctx, query, environmentID)
+	rows, err := s.db.Query(ctx, query, environmentID)
 	if err != nil {
 		return nil, fmt.Errorf("storage.APIKeyStore.ListByEnvironment: %w", err)
 	}
@@ -197,7 +196,7 @@ func (s *APIKeyStore) Revoke(ctx context.Context, id uuid.UUID, revokedAt time.T
 		WHERE id = $1
 	`
 
-	tag, err := s.pool.Exec(ctx, query, id, revokedAt)
+	tag, err := s.db.Exec(ctx, query, id, revokedAt)
 	if err != nil {
 		return fmt.Errorf("storage.APIKeyStore.Revoke: %w", err)
 	}
@@ -217,7 +216,7 @@ func (s *APIKeyStore) UpdateLastUsed(ctx context.Context, id uuid.UUID, usedAt t
 			WHERE id = $1
 		`
 
-	tag, err := s.pool.Exec(ctx, query, id, usedAt)
+	tag, err := s.db.Exec(ctx, query, id, usedAt)
 	if err != nil {
 		return fmt.Errorf("storage.APIKeyStore.UpdateLastUsed: %w", err)
 	}

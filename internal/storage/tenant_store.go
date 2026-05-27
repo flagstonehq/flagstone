@@ -9,18 +9,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // TenantStore handles persistence and retrieval of tenants.
 type TenantStore struct {
-	pool *pgxpool.Pool
+	db Querier
 }
 
 // NewTenantStore creates a new TenantStore backed by the given connection pool.
-func NewTenantStore(pool *pgxpool.Pool) *TenantStore {
+func NewTenantStore(db Querier) *TenantStore {
 	return &TenantStore{
-		pool: pool,
+		db: db,
 	}
 }
 
@@ -35,7 +34,7 @@ func (s *TenantStore) ExistsAny(ctx context.Context) (bool, error) {
 	`
 
 	var exists bool
-	if err := s.pool.QueryRow(ctx, query).Scan(&exists); err != nil {
+	if err := s.db.QueryRow(ctx, query).Scan(&exists); err != nil {
 		return false, fmt.Errorf("storage.TenantStore.ExistsAny: %w", err)
 	}
 
@@ -58,7 +57,7 @@ func (s *TenantStore) Create(ctx context.Context, tenant *Tenant) error {
 	tenant.Slug = strings.TrimSpace(tenant.Slug)
 	tenant.Name = strings.TrimSpace(tenant.Name)
 
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		tenant.ID,
@@ -86,7 +85,7 @@ func (s *TenantStore) GetByID(ctx context.Context, id uuid.UUID) (*Tenant, error
 	`
 
 	var tenant Tenant
-	if err := s.pool.QueryRow(ctx, query, id).Scan(
+	if err := s.db.QueryRow(ctx, query, id).Scan(
 		&tenant.ID,
 		&tenant.Slug,
 		&tenant.Name,
@@ -113,7 +112,7 @@ func (s *TenantStore) GetBySlug(ctx context.Context, slug string) (*Tenant, erro
 	`
 
 	var tenant Tenant
-	if err := s.pool.QueryRow(ctx, query, strings.TrimSpace(slug)).Scan(
+	if err := s.db.QueryRow(ctx, query, strings.TrimSpace(slug)).Scan(
 		&tenant.ID,
 		&tenant.Slug,
 		&tenant.Name,

@@ -7,18 +7,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // FlagEnvironmentStore handles per-environment flag configuration.
 type FlagEnvironmentStore struct {
-	pool *pgxpool.Pool
+	db Querier
 }
 
 // NewFlagEnvironmentStore creates a new FlagEnvironmentStore backed by the given connection pool.
-func NewFlagEnvironmentStore(pool *pgxpool.Pool) *FlagEnvironmentStore {
+func NewFlagEnvironmentStore(db Querier) *FlagEnvironmentStore {
 	return &FlagEnvironmentStore{
-		pool: pool,
+		db: db,
 	}
 }
 
@@ -42,7 +41,7 @@ func (s *FlagEnvironmentStore) Upsert(ctx context.Context, cfg *FlagEnvironment)
 			updated_by = EXCLUDED.updated_by
 		RETURNING version, created_at, updated_at
 	`
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		cfg.FlagID,
@@ -81,7 +80,7 @@ func (s *FlagEnvironmentStore) Get(ctx context.Context, flagID, environmentID uu
 		defaultValue []byte
 		updatedBy    uuid.NullUUID
 	)
-	if err := s.pool.QueryRow(ctx, query, flagID, environmentID).Scan(
+	if err := s.db.QueryRow(ctx, query, flagID, environmentID).Scan(
 		&cfg.FlagID,
 		&cfg.EnvironmentID,
 		&cfg.Enabled,
@@ -113,7 +112,7 @@ func (s *FlagEnvironmentStore) UpdateWithVersion(ctx context.Context, cfg *FlagE
 		  AND version = $7
 		RETURNING version, updated_at
 	`
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		cfg.FlagID,
@@ -155,7 +154,7 @@ func (s *FlagEnvironmentStore) ListByEnvironment(ctx context.Context, environmen
 		  AND f.archived_at IS NULL
 		ORDER BY f.created_at ASC
 	`
-	rows, err := s.pool.Query(ctx, query, environmentID)
+	rows, err := s.db.Query(ctx, query, environmentID)
 	if err != nil {
 		return nil, fmt.Errorf("storage.FlagEnvironmentStore.ListByEnvironment: %w", err)
 	}

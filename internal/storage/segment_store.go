@@ -10,18 +10,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // SegmentStore handles persistence and retrieval of segments.
 type SegmentStore struct {
-	pool *pgxpool.Pool
+	db Querier
 }
 
 // NewSegmentStore creates a new SegmentStore backed by the given connection pool.
-func NewSegmentStore(pool *pgxpool.Pool) *SegmentStore {
+func NewSegmentStore(db Querier) *SegmentStore {
 	return &SegmentStore{
-		pool: pool,
+		db: db,
 	}
 }
 
@@ -50,7 +49,7 @@ func (s *SegmentStore) Create(ctx context.Context, segment *Segment) error {
 	segment.Key = strings.TrimSpace(segment.Key)
 	segment.Name = strings.TrimSpace(segment.Name)
 
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		segment.ID,
@@ -100,7 +99,7 @@ func (s *SegmentStore) GetByKey(ctx context.Context, projectID uuid.UUID, key st
 		createdBy   uuid.NullUUID
 	)
 
-	if err := s.pool.QueryRow(ctx, query, projectID, strings.TrimSpace(key)).Scan(
+	if err := s.db.QueryRow(ctx, query, projectID, strings.TrimSpace(key)).Scan(
 		&segment.ID,
 		&segment.ProjectID,
 		&segment.Key,
@@ -145,7 +144,7 @@ func (s *SegmentStore) ListByProject(ctx context.Context, projectID uuid.UUID) (
 			ORDER BY created_at ASC
 		`
 
-	rows, err := s.pool.Query(ctx, query, projectID)
+	rows, err := s.db.Query(ctx, query, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("storage.SegmentStore.ListByProject: %w", err)
 	}
@@ -203,7 +202,7 @@ func (s *SegmentStore) Update(ctx context.Context, segment *Segment) error {
 
 	segment.Key = strings.TrimSpace(segment.Key)
 	segment.Name = strings.TrimSpace(segment.Name)
-	err := s.pool.QueryRow(
+	err := s.db.QueryRow(
 		ctx,
 		query,
 		segment.ID,
@@ -233,7 +232,7 @@ func (s *SegmentStore) Archive(ctx context.Context, id uuid.UUID, archivedAt tim
 		WHERE id = $1
 		  AND archived_at IS NULL
 	`
-	tag, err := s.pool.Exec(ctx, query, id, archivedAt)
+	tag, err := s.db.Exec(ctx, query, id, archivedAt)
 	if err != nil {
 		return fmt.Errorf("storage.SegmentStore.Archive: %w", err)
 	}
