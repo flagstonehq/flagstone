@@ -684,8 +684,8 @@ Internet
 | T16 | **API key in logs/URLs** | Key appears in access logs or query strings | Keys are sent in Authorization header (not URL). Server never logs full key values — only key_prefix. | Mitigated |
 | T17 | **CORS bypass** | Cross-origin requests from malicious sites | CORS whitelist configured per deployment. Dashboard and API on same origin when possible. | Planned (M2) |
 | T18 | **Bootstrap TOCTOU** | Two simultaneous `POST /setup` requests both pass the "no tenants exist" check and create duplicate owner accounts | `INSERT INTO tenants ... WHERE NOT EXISTS (SELECT 1 FROM tenants)` in a single atomic statement. If `rows affected = 0`, return `409 Conflict`. The DB uniqueness constraint on `tenants.slug` is a secondary guard. | Mitigated |
-| T19 | **Distributed credential brute force** | Attacker rotates IPs to evade per-IP rate limit | Per-account lockout: 5 failed attempts in 15 min locks the account for 15 min regardless of IP. | Planned (M1) |
-| T20 | **Refresh token theft (silent)** | Attacker steals refresh cookie via XSS, malware, or browser dump — uses it concurrently with legitimate user | Token reuse detection: presenting a rotated refresh token kills ALL sessions for the user and emits a security alert. The legitimate user is forced to re-authenticate, attacker loses access too. | Planned (M1) |
+| T19 | **Distributed credential brute force** | Attacker rotates IPs to evade per-IP rate limit | Per-account lockout: 5 failed attempts in 15 min locks the account for 15 min regardless of IP. | Mitigated |
+| T20 | **Refresh token theft (silent)** | Attacker steals refresh cookie via XSS, malware, or browser dump — uses it concurrently with legitimate user | Token reuse detection: presenting a rotated refresh token kills ALL sessions for the user and emits a security alert. The legitimate user is forced to re-authenticate, attacker loses access too. | Mitigated |
 | T21 | **Password-only account takeover** | Phishing, password reuse from another breach, weak password guessed | TOTP MFA available as opt-in. RFC 6238 standard — works with Google Authenticator, Authy, 1Password, etc. Backup codes provided. | Planned (M2) |
 | T22 | **Real-time phishing of MFA codes** | Adversary-in-the-middle site captures password + TOTP code and replays within 30s | TOTP does not mitigate this. WebAuthn / passkeys (M3) bind the credential to the origin, defeating relay attacks. | Planned (M3) |
 | T23 | **Compromised password reused from public breach** | Attacker tries known leaked credentials | HaveIBeenPwned k-anonymity check at signup and password reset rejects breached passwords. No password is sent to the external API in plaintext or full hash. | Planned (M2) |
@@ -862,8 +862,8 @@ UNION ALL SELECT 'audit_log', count(*) FROM audit_log;
 - [x] RBAC middleware
 - [ ] Rate limiting (in-process token bucket)
 - [ ] JSONB rule validation (depth, size, operator whitelist)
-- [ ] Account lockout after repeated failed logins (T19)
-- [ ] Refresh token reuse detection + session-wide invalidation (T20)
+- [x] Account lockout after repeated failed logins (T19)
+- [x] Refresh token reuse detection + session-wide invalidation (T20)
 
 ### Milestone 2 — production hardening
 

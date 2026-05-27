@@ -81,6 +81,7 @@ func main() {
 	stores := storage.NewStores(dbPool)
 
 	apiServer := api.NewServer(stores, dbPool, cfg, logger)
+	apiServer.StartCleanup(rootCtx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

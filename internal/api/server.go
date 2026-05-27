@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/thomas-vilte/flagstone/internal/api/middleware"
@@ -9,6 +11,12 @@ import (
 	"github.com/thomas-vilte/flagstone/internal/config"
 	"github.com/thomas-vilte/flagstone/internal/storage"
 	"go.uber.org/zap"
+)
+
+const (
+	cleanupInterval       = 30 * time.Minute
+	cleanupOpTimeout      = 30 * time.Second
+	loginAttemptRetention = 1 * time.Hour
 )
 
 // Server holds shared dependencies for all API handlers and registers routes.
@@ -86,4 +94,46 @@ func (s *Server) withMiddleware(next http.Handler, mws ...func(http.Handler) htt
 		next = mws[i](next)
 	}
 	return next
+}
+
+// StartCleanup launches a background goroutine that periodically deletes
+// expired revoked refresh tokens and old login attempt records.
+func (s *Server) StartCleanup(ctx context.Context) {
+	s.logger.Info("starting periodic cleanup", zap.Duration("interval", cleanupInterval))
+	go func() {
+		ticker := time.NewTicker(cleanupInterval)
+		defer ticker.Stop()
+
+		s.runOnce(ctx)
+
+		for {
+			select {
+			case <-ticker.C:
+				s.runOnce(ctx)
+			case <-ctx.Done():
+				s.logger.Info("cleanup stopped")
+				return
+			}
+		}
+	}()
+}
+
+func (s *Server) runOnce(ctx context.Context) {
+	s.runCleanup(ctx, "delete expired revoked tokens", s.stores.RevokedTokens.DeleteExpired)
+	s.runCleanup(ctx, "delete old login attempts", func(opCtx context.Context) (int64, error) {
+		return s.stores.LoginAttempts.DeleteOlderThan(opCtx, time.Now().UTC().Add(-loginAttemptRetention))
+	})
+}
+
+func (s *Server) runCleanup(ctx context.Context, name string, fn func(context.Context) (int64, error)) {
+	opCtx, cancel := context.WithTimeout(ctx, cleanupOpTimeout)
+	defer cancel()
+	n, err := fn(opCtx)
+	if err != nil {
+		s.logger.Error("cleanup: "+name, zap.Error(err))
+		return
+	}
+	if n > 0 {
+		s.logger.Info("cleanup: "+name, zap.Int64("count", n))
+	}
 }
