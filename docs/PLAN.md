@@ -15,13 +15,16 @@
 6. [Fase 2 — Auth Core](#6-fase-2--auth-core)
 7. [Fase 3 — Middleware + Router + Bootstrap](#7-fase-3--middleware--router--bootstrap)
 8. [Fase 4 — Auth Endpoints](#8-fase-4--auth-endpoints)
-9. [Fase 5 — CRUD Endpoints](#9-fase-5--crud-endpoints)
-10. [Fase 6 — Audit Log Endpoint](#10-fase-6--audit-log-endpoint)
+9. [Fase 4.5 — Engine Spike (validacion de modelo)](#85-fase-45--engine-spike-validacion-de-modelo)
+10. [Fase 5 — CRUD Endpoints](#9-fase-5--crud-endpoints)
 11. [Fase 7 — Rule Evaluation Engine](#11-fase-7--rule-evaluation-engine)
 12. [Fase 8 — Evaluate Endpoints](#12-fase-8--evaluate-endpoints)
-13. [Fase 9 — CI Pipeline + Integracion Final](#13-fase-9--ci-pipeline--integracion-final)
-14. [Dependencias entre Fases](#14-dependencias-entre-fases)
-15. [Estimacion de Esfuerzo](#15-estimacion-de-esfuerzo)
+13. [Fase 6 — Audit Log Endpoint](#10-fase-6--audit-log-endpoint)
+14. [Fase 9 — CI Pipeline + Integracion Final](#13-fase-9--ci-pipeline--integracion-final)
+15. [Dependencias entre Fases](#14-dependencias-entre-fases)
+16. [Estimacion de Esfuerzo](#15-estimacion-de-esfuerzo)
+
+> **Nota de orden**: el orden de ejecucion recomendado es 0 → 1 → 2 → 3 → 4 → **4.5 (spike)** → 5 → 7 → 8 → 6 → 9. La numeracion de fases se mantiene por compatibilidad con commits/PRs ya hechos, pero las dependencias reales se describen en la seccion 14.
 
 ---
 
@@ -112,6 +115,19 @@ El proyecto usa Go 1.26.2. El `go.mod` ya lo refleja. El Dockerfile builder usa 
 - Ser puro lo hace trivialmente testeable: input -> output, sin side effects.
 - La storage layer hace todo el I/O (eager load de flags + segments) y le pasa structs al engine.
 - Esta separacion esta explicitamente disenada en DESIGN.md.
+
+### Engine spike antes de CRUDs (orden de fases)
+
+**Decision**: despues de cerrar la Fase 4 (auth endpoints), corre una **Fase 4.5 — Engine Spike** antes de empezar la Fase 5 (CRUDs). Es un paquete `internal/engine/` puro Go, sin HTTP ni DB, que se construye contra structs de test en memoria. Solo despues de validar el modelo se hacen los CRUDs.
+
+**Justificacion**:
+- La parte mas riesgosa algoritmicamente del sistema es la evaluacion (operadores, segment resolution con cycle detection, rollout hashing, precedence de reglas).
+- Los CRUDs cementan en HTTP la forma del modelo (`Flag`, `FlagEnvironment.Rules` JSONB, `Segment.Rules` JSONB). Si el engine descubre que esa forma no aguanta lo que necesita, terminas reescribiendo handlers ya entregados.
+- Hacer un spike pequeno del engine (~3-5 dias) valida el modelo antes de comprometerlo en la API publica.
+- Si el spike fuerza cambios al schema, se crea una migracion 000004 y los stores se ajustan ANTES de tocar handlers.
+- Despues del spike, la Fase 7 (Engine completo) productioniza lo que el spike ya valido: panic recovery, los 15 operadores completos, performance, edge cases extra.
+
+**Trade-off**: agrega ~3-5 dias antes de empezar CRUDs. El downside es que si confias plenamente en que el modelo actual es correcto, podes saltearlo y arrancar Fase 5 directo. El upside es evitar una reescritura grande de handlers si el modelo no aguanta.
 
 ### Middleware stack order (load-bearing)
 
@@ -568,33 +584,33 @@ Cada store tiene su archivo `*_test.go` con tests que:
 
 ### Checklist Fase 1
 
-- [ ] Crear `internal/storage/postgres.go` con `NewPool()` (config pool, retry)
-- [ ] Crear `internal/storage/models.go` con todos los structs del dominio
-- [ ] Crear `internal/storage/errors.go` con sentinel errors
-- [ ] Crear `internal/storage/types.go` con value types para IDs
-- [ ] Crear `internal/storage/tenant_store.go` (4 metodos)
-- [ ] Crear `internal/storage/user_store.go` (5 metodos)
-- [ ] Crear `internal/storage/session_store.go` (5 metodos)
-- [ ] Crear `internal/storage/member_store.go` (5 metodos)
-- [ ] Crear `internal/storage/project_store.go` (4 metodos)
-- [ ] Crear `internal/storage/environment_store.go` (4 metodos)
-- [ ] Crear `internal/storage/apikey_store.go` (5 metodos)
-- [ ] Crear `internal/storage/flag_store.go` (5 metodos)
-- [ ] Crear `internal/storage/flag_env_store.go` (4 metodos, bulk JOIN, OCC)
-- [ ] Crear `internal/storage/segment_store.go` (6 metodos)
-- [ ] Crear `internal/storage/audit_store.go` (2 metodos: Insert, Query)
-- [ ] Tests: `postgres_test.go` — pool creation, ping
-- [ ] Tests: `tenant_store_test.go` — CRUD, ExistsAny
-- [ ] Tests: `user_store_test.go` — CRUD, CITEXT case-insensitive
-- [ ] Tests: `session_store_test.go` — CRUD, DeleteExpired
-- [ ] Tests: `member_store_test.go` — Add, GetRole, UpdateRole, Remove
-- [ ] Tests: `project_store_test.go` — CRUD, tenant-scoped
-- [ ] Tests: `environment_store_test.go` — CRUD, project-scoped
-- [ ] Tests: `apikey_store_test.go` — CRUD, Revoke, active index
-- [ ] Tests: `flag_store_test.go` — CRUD, Archive
-- [ ] Tests: `flag_env_store_test.go` — Upsert, OCC conflict, bulk JOIN
-- [ ] Tests: `segment_store_test.go` — CRUD, Archive
-- [ ] Tests: `audit_store_test.go` — Insert, Query con filtros
+- [x] Crear `internal/storage/postgres.go` con `NewPool()` (config pool, retry)
+- [x] Crear `internal/storage/models.go` con todos los structs del dominio
+- [x] Crear `internal/storage/errors.go` con sentinel errors
+- [x] Crear `internal/storage/types.go` con value types para IDs
+- [x] Crear `internal/storage/tenant_store.go` (4 metodos)
+- [x] Crear `internal/storage/user_store.go` (5 metodos)
+- [x] Crear `internal/storage/session_store.go` (5 metodos)
+- [x] Crear `internal/storage/member_store.go` (5 metodos)
+- [x] Crear `internal/storage/project_store.go` (4 metodos)
+- [x] Crear `internal/storage/environment_store.go` (4 metodos)
+- [x] Crear `internal/storage/apikey_store.go` (5 metodos)
+- [x] Crear `internal/storage/flag_store.go` (5 metodos)
+- [x] Crear `internal/storage/flag_env_store.go` (4 metodos, bulk JOIN, OCC)
+- [x] Crear `internal/storage/segment_store.go` (6 metodos)
+- [x] Crear `internal/storage/audit_store.go` (2 metodos: Insert, Query)
+- [x] Tests: `postgres_test.go` — pool creation, ping
+- [x] Tests: `tenant_store_test.go` — CRUD, ExistsAny
+- [x] Tests: `user_store_test.go` — CRUD, CITEXT case-insensitive
+- [x] Tests: `session_store_test.go` — CRUD, DeleteExpired
+- [x] Tests: `member_store_test.go` — Add, GetRole, UpdateRole, Remove
+- [x] Tests: `project_store_test.go` — CRUD, tenant-scoped
+- [x] Tests: `environment_store_test.go` — CRUD, project-scoped
+- [x] Tests: `apikey_store_test.go` — CRUD, Revoke, active index
+- [x] Tests: `flag_store_test.go` — CRUD, Archive
+- [x] Tests: `flag_env_store_test.go` — Upsert, OCC conflict, bulk JOIN
+- [x] Tests: `segment_store_test.go` — CRUD, Archive
+- [x] Tests: `audit_store_test.go` — Insert, Query con filtros
 
 ---
 
@@ -735,19 +751,19 @@ Todos son unit tests puros — no necesitan DB ni HTTP.
 
 ### Checklist Fase 2
 
-- [ ] Crear `internal/auth/jwt.go` (GenerateAccessToken, ValidateAccessToken, HS256)
-- [ ] Crear `internal/auth/claims.go` (Claims struct con sub, tid, role, exp, iss)
-- [ ] Crear `internal/auth/password.go` (HashPassword, VerifyPassword, bcrypt cost=12)
-- [ ] Crear `internal/auth/apikey.go` (GenerateAPIKey, crypto/rand, base62, SHA-256)
-- [ ] Crear `internal/auth/token.go` (GenerateRefreshToken, crypto/rand, base62, SHA-256)
-- [ ] Crear `internal/auth/roles.go` (Role type, Level, AtLeast)
-- [ ] Crear `internal/auth/base62.go` (Encode base62)
-- [ ] Tests: `jwt_test.go` — round-trip, expired, wrong secret, claims
-- [ ] Tests: `password_test.go` — round-trip, wrong password, cost
-- [ ] Tests: `apikey_test.go` — formato, hash deterministico, prefix, unicidad
-- [ ] Tests: `token_test.go` — round-trip, unicidad
-- [ ] Tests: `roles_test.go` — hierarchy, AtLeast, unknown role
-- [ ] Tests: `base62_test.go` — round-trip, edge cases
+- [x] Crear `internal/auth/jwt.go` (GenerateAccessToken, ValidateAccessToken, HS256)
+- [x] Crear `internal/auth/claims.go` (Claims struct con sub, tid, role, exp, iss)
+- [x] Crear `internal/auth/password.go` (HashPassword, VerifyPassword, bcrypt cost=12)
+- [x] Crear `internal/auth/apikey.go` (GenerateAPIKey, crypto/rand, base62, SHA-256)
+- [x] Crear `internal/auth/token.go` (GenerateRefreshToken, crypto/rand, base62, SHA-256)
+- [x] Crear `internal/auth/roles.go` (Role type, Level, AtLeast)
+- [x] Crear `internal/auth/base62.go` (Encode base62)
+- [x] Tests: `jwt_test.go` — round-trip, expired, wrong secret, claims
+- [x] Tests: `password_test.go` — round-trip, wrong password, cost
+- [x] Tests: `apikey_test.go` — formato, hash deterministico, prefix, unicidad
+- [x] Tests: `token_test.go` — round-trip, unicidad
+- [x] Tests: `roles_test.go` — hierarchy, AtLeast, unknown role
+- [x] Tests: `base62_test.go` — round-trip, edge cases
 
 ---
 
@@ -1036,10 +1052,10 @@ Server (orden de checks):
   5. Resolver tenant context:
      a. Si tenant_slug provisto:
         - JOIN tenant_members + tenants verificar membership
-        - Si no es miembro: 403 NOT_A_MEMBER (mensaje generico)
+        - Si no es miembro / slug no existe: 401 INVALID_CREDENTIALS (ver nota mas abajo)
      b. Si tenant_slug ausente:
         - SELECT memberships del user
-        - 0 memberships: 403 NO_TENANT_ACCESS
+        - 0 memberships: 401 INVALID_CREDENTIALS (ver nota mas abajo)
         - 1 membership: usar ese tenant
         - 2+ memberships: 409 MULTIPLE_TENANTS con lista en response
   6. Generar JWT access (15 min) con sub=user_id, tid=tenant_id, role
@@ -1146,12 +1162,12 @@ Mismo principio: agregás el hash a la blocklist al hacer logout, asi si alguien
 | Login single-tenant success | 200, JWT con tid correcto, refresh cookie, audit entry |
 | Login multi-tenant sin slug | 409 MULTIPLE_TENANTS, lista de tenants en response |
 | Login multi-tenant con slug | 200, JWT con tid del slug indicado |
-| Login con slug invalido (no miembro) | 403 NOT_A_MEMBER, mensaje generico |
+| Login con slug invalido (no miembro) | 401 INVALID_CREDENTIALS (mismo bucket que sin tenants — anti enumeration) |
 | Login password incorrecto | 401 generico, INSERT en login_attempts |
 | Login email no existe | 401 generico, tiempo de respuesta similar a password mal |
 | Login con 5 intentos fallidos | 6to intento → 423 Locked con Retry-After |
 | Login exitoso despues de fails parciales | Limpia login_attempts del user |
-| Login sin tenants asociados | 403 NO_TENANT_ACCESS |
+| Login sin tenants asociados | 401 INVALID_CREDENTIALS (responde igual que password mal — anti enumeration, ver nota al final) |
 | Refresh exitoso | Nuevo access + refresh, old hash en revoked_refresh_tokens |
 | Refresh con token expirado | 401 |
 | Refresh con token desconocido | 401 |
@@ -1163,26 +1179,125 @@ Mismo principio: agregás el hash a la blocklist al hacer logout, asi si alguien
 
 ### Checklist Fase 4
 
-- [ ] Migration `000003_auth_phase4.up.sql` (login_attempts + revoked_refresh_tokens) + down
-- [ ] Crear `internal/storage/login_attempt_store.go` (Record, CountSince, ClearForUser)
-- [ ] Crear `internal/storage/revoked_token_store.go` (Insert, Lookup, CleanupExpired)
-- [ ] Tests de storage: login_attempt_store_test.go, revoked_token_store_test.go
-- [ ] Refactor stores a interface `Querier` (preparacion para Fase 5 — ver Decisiones Técnicas)
-- [ ] Crear `internal/api/auth.go` con login (multi-tenant), refresh (reuse detection), logout
-- [ ] Tests: login single-tenant, multi-tenant con/sin slug, slug invalido, sin tenants
-- [ ] Tests: login password incorrecto, email no existe (timing equivalente)
-- [ ] Tests: account lockout (5 fails → 423, lockout check antes de bcrypt)
-- [ ] Tests: refresh exitoso, expirado, desconocido, reuse detection
-- [ ] Tests: refresh attack scenario completo (atacante + legitimo)
-- [ ] Tests: logout exitoso, logout + refresh re-uso
-- [ ] Job de cleanup: scheduled task que borra `login_attempts` con failed_at > 1 dia y `revoked_refresh_tokens` con expires_at < NOW() (puede ser cron externo o goroutine en main.go)
-- [ ] Actualizar threat matrix en SECURITY.md: T19, T20 → "Mitigated"
+- [x] Migration `000003_auth_security.up.sql` (login_attempts + revoked_refresh_tokens) + down
+- [x] Crear `internal/storage/login_attempt_store.go` (Record, CountSince, ClearForUser, DeleteOlderThan)
+- [x] Crear `internal/storage/revoked_token_store.go` (Insert, Lookup, DeleteExpired)
+- [x] Tests de storage: `login_attempt_store_test.go`, `revoked_token_store_test.go` (cubren Record/CountSince/ClearForUser/DeleteOlderThan + Insert/InsertIdempotent/Lookup/DeleteExpired)
+- [x] Refactor stores a interface `Querier` (`internal/storage/querier.go`, `Stores.WithTx`, `Stores.BeginTx`)
+- [x] Crear `internal/api/auth.go` con login (multi-tenant), refresh (reuse detection), logout
+- [x] Tests: login single-tenant, multi-tenant con/sin slug, slug invalido (`TestLogin_MultiTenant_*`, `TestLogin_TenantSlug_*`)
+- [x] Tests: usuario sin tenants (0 memberships) (`TestLogin_NoTenantAccess`) — responde 401 INVALID_CREDENTIALS (ver nota abajo)
+- [x] Tests: login password incorrecto, email no existe (timing equivalente via `fakePasswordHash`)
+- [x] Tests: account lockout — 5 fails → 423, reset en login exitoso (`TestLogin_LocksAfterFiveFailures`, `TestLogin_SuccessClearsLockoutCounter`)
+- [x] Tests: refresh exitoso, expirado, reuse detection (`TestRefresh_ReuseDetected_KillsAllSessions`, `TestRefresh_OldTokenAfterRotation_IsRevoked`)
+- [x] Tests: refresh attack scenario completo (`TestRefresh_AttackScenario_StolenTokenBurnsLegitSession` — legítimo rota, atacante replay → todas las sessions mueren incluyendo la nueva del legítimo, audit row escrito)
+- [x] Tests: logout exitoso, logout + refresh re-uso (`TestLogout_RevokesRefreshToken`)
+- [x] Job de cleanup: `Server.StartCleanup` con ticker de 30 min, timeout por operación (`cleanupOpTimeout`), wired en `cmd/flagstone/main.go`. Retención: `login_attempts` 1 hora, `revoked_refresh_tokens` hasta `expires_at`.
+- [x] Actualizar threat matrix en SECURITY.md: T19, T20 → "Mitigated"
+
+### Cambio respecto al spec original — `NO_TENANT_ACCESS`
+
+El plan original (sección "Login multi-tenant híbrido") especificaba que un usuario sin memberships (`len(members) == 0`) recibiera **403 NO_TENANT_ACCESS**. Durante la implementación se descubrió que ese 403 distingue "email registrado sin tenant" de "email no registrado" (que responde 401 INVALID_CREDENTIALS), creando un vector de enumeración de emails.
+
+**Decisión**: colapsar todos los casos de fallo de resolución de tenant (sin memberships, slug no existe, no es miembro del slug) en el mismo **401 INVALID_CREDENTIALS**. El cliente legítimo sin memberships ve la misma respuesta que un password incorrecto; un atacante no puede usar la respuesta para enumerar quién está registrado.
+
+El sentinel `errNoTenantAccess` se mantiene internamente para logging/debugging, pero no se propaga al cliente como código de error distinto.
+
+---
+
+## 8.5. Fase 4.5 — Engine Spike (validacion de modelo)
+
+**Objetivo:** Validar que el modelo de datos actual aguanta la evaluacion de reglas **antes** de comprometerlo en handlers CRUD. Paquete puro Go, sin HTTP ni DB.
+
+### Justificacion
+
+El engine (Fase 7) es la parte mas riesgosa algoritmicamente: operadores con type coercion, segment resolution con cycle detection, rollout hashing, precedence de reglas. Si la forma de `FlagEnvironment.Rules`, `Segment.Rules` o `Flag.DefaultValue` no aguanta esos casos, descubrir eso DESPUES de tener CRUDs entregados implica reescribir handlers y migrar JSONB existente.
+
+Un spike pequeno (3-5 dias) valida la forma del modelo contra los casos reales antes de cementarlo.
+
+### Que NO es esta fase
+
+- NO es la implementacion completa del engine (eso queda en Fase 7).
+- NO es el endpoint de evaluate (eso queda en Fase 8).
+- NO toca HTTP, DB, ni stores.
+- NO requiere panic recovery, structured logging, ni performance tuning.
+
+### Que SI hace
+
+Construye lo minimo del engine para validar:
+
+1. La forma de `FlagEnvironment.Rules` (JSONB) puede expresar AND/OR/NOT anidados.
+2. La forma de `Segment.Rules` (JSONB) es consistente con la de flag rules.
+3. Los operadores principales funcionan con type coercion sobre valores realistas (string, number, bool, array).
+4. Segment refs entre reglas se resuelven con cycle detection.
+5. Rollouts deterministicos por hash funcionan (mismo user + mismo flag = mismo resultado).
+6. La precedencia "first rule wins" es expresable.
+
+### Estructura de archivos
+
+```
+internal/engine/
+├── types.go           # FlagConfig, Rule, ConditionNode, RolloutConfig, Segment, Reason
+├── engine.go          # Evaluate() — solo el path principal, sin panic recovery aun
+├── conditions.go      # evaluateNode() recursivo (all/any/not/leaf)
+├── operators.go       # subset minimo: eq, neq, in, gt, contains, segment, exists
+├── rollout.go         # inRollout() con FNV-1a
+├── segments.go        # resolveSegment() con visited set
+├── engine_test.go     # casos representativos de cada path
+├── conditions_test.go
+├── operators_test.go
+├── rollout_test.go
+└── segments_test.go
+```
+
+**Diferencia con Fase 7**: el spike implementa ~7 operadores (los que cubren los casos representativos), no los 15. No tiene panic recovery, no tiene structured logging integrado, no hace performance tuning. Es codigo "good enough to validate the model", no "good enough to ship".
+
+### Decision al final del spike
+
+Tres salidas posibles:
+
+1. **Modelo OK** → seguir con Fase 5 (CRUD) sin cambios al schema. El codigo del spike se queda en `internal/engine/` y se completa en Fase 7.
+
+2. **Modelo necesita cambios menores** → ajustar `models.go` y crear migracion `000004_engine_model_fixes.up.sql`. Los stores afectados se actualizan ANTES de Fase 5.
+
+3. **Modelo necesita refactor mayor** (improbable) → pausar y discutir. Puede implicar cambiar la forma de Rules JSONB completamente.
+
+### Tests del spike
+
+Cada uno cubre **un riesgo concreto del modelo**, no exhaustividad:
+
+| Test | Que valida del modelo |
+|---|---|
+| `rule_with_nested_and_or` | `Rules` JSONB puede anidar AND/OR/NOT a 5+ niveles sin perdida de estructura |
+| `rule_first_match_wins` | El orden de las reglas en el array JSONB es respetado |
+| `rule_segment_ref_works` | Una regla puede referenciar un segmento por key y resolverlo |
+| `segment_cycle_detected` | A→B→A no causa stack overflow, retorna false |
+| `rollout_deterministic` | Mismo user_id + mismo flag_key → mismo bucket en 1000 corridas |
+| `rollout_monotonic` | Users en 10% son subset de users en 25% |
+| `operator_type_coercion` | `eq` con "5" vs 5 retorna false (no coerciona implicitamente cross-type) |
+| `flag_default_value_resolution` | Sin rules y sin env_default → usa flag.DefaultValue del modelo |
+| `flag_env_default_override` | Con env_default presente → ese tiene precedencia sobre flag.DefaultValue |
+
+### Checklist Fase 4.5
+
+- [ ] Crear `internal/engine/types.go` (Rule, ConditionNode, RolloutConfig, FlagConfig, Segment, Reason, EvaluateResult)
+- [ ] Crear `internal/engine/engine.go` (Evaluate — path principal, sin panic recovery)
+- [ ] Crear `internal/engine/conditions.go` (recursive walker: all/any/not/leaf)
+- [ ] Crear `internal/engine/operators.go` (subset: eq, neq, in, gt, contains, segment, exists)
+- [ ] Crear `internal/engine/rollout.go` (FNV-1a, inRollout)
+- [ ] Crear `internal/engine/segments.go` (resolveSegment con cycle detection)
+- [ ] Tests representativos (1 por riesgo, ver tabla arriba)
+- [ ] Decision documentada: modelo OK / migracion 000004 / refactor mayor
+- [ ] Si aplica: migracion 000004 + ajustes en `models.go` + stores afectados
+- [ ] Confirmar con un PR pequeno antes de empezar Fase 5
 
 ---
 
 ## 9. Fase 5 — CRUD Endpoints
 
 **Objetivo:** Gestion completa de flags, segments, projects, environments, API keys desde la dashboard.
+
+**Prerequisito**: Fase 4.5 (spike) cerrada — el modelo de datos esta validado y no va a cambiar de forma significativa durante esta fase.
 
 ### Estructura de archivos
 
@@ -1435,7 +1550,21 @@ LIMIT $7 OFFSET $8
 
 ## 11. Fase 7 — Rule Evaluation Engine
 
-**Objetivo:** El core algoritmico del sistema. Funciones puras, sin I/O, altamente testeables.
+**Objetivo:** Productionizar el engine. Funciones puras, sin I/O, altamente testeables.
+
+**Prerequisito**: Fase 4.5 (spike) ya implemento el core de `engine.Evaluate` con un subset de operadores. Esta fase **completa** lo que el spike dejo: los 15 operadores, panic recovery, structured logging, y los casos edge.
+
+**Diferencia con el spike**:
+
+| Aspecto | Fase 4.5 (spike) | Fase 7 (engine completo) |
+|---|---|---|
+| Operadores | ~7 (representativos) | 15 completos |
+| Panic recovery | No | Si (cada Evaluate dentro de defer/recover) |
+| Logging | Nada o minimo | zap structured logs por path de error |
+| Performance | No medido | Benchmarked, target < 1ms por flag |
+| `EvaluateAll` (bulk) | No implementado | Si — para Fase 8 |
+| Error policy completa | No | Si — toda la tabla de "Resilience over Correctness" |
+| Type coercion | Casos basicos | Tabla completa de coercions |
 
 ### Estructura de archivos
 
@@ -1951,34 +2080,53 @@ curl -X POST http://localhost:8080/api/v1/evaluate/flags/new-checkout \
 
 ## 14. Dependencias entre Fases
 
+### Orden recomendado (con engine spike)
+
 ```
 Fase 0: Foundation
   │
-  ├──▶ Fase 1: Storage Layer (depende de Fase 0 — necesita Postgres)
-  │     │
-  │     ├──▶ Fase 2: Auth Core (independiente de storage, pero se hace despues)
-  │     │     │
-  │     │     ▼
-  │     │   Fase 3: Middleware + Bootstrap (depende de Fases 1 + 2)
-  │     │     │
-  │     │     ▼
-  │     │   Fase 4: Auth Endpoints (depende de Fase 3)
-  │     │     │
-  │     │     ▼
-  │     │   Fase 5: CRUD Endpoints (depende de Fase 3)
-  │     │     │
-  │     │     ▼
-  │     │   Fase 6: Audit Log Endpoint (depende de Fase 5)
-  │     │
-  │     └──▶ Fase 7: Rule Engine (independiente — pure code, sin I/O)
+  ▼
+Fase 1: Storage Layer  (depende de Postgres)
   │
-  └──▶ Fase 8: Evaluate Endpoints (depende de Fases 3 + 7 + 1)
-         │
-         ▼
-       Fase 9: CI Pipeline + Integracion Final (depende de todo lo anterior)
+  ▼
+Fase 2: Auth Core  (codigo puro)
+  │
+  ▼
+Fase 3: Middleware + Bootstrap  (depende de Fases 1 + 2)
+  │
+  ▼
+Fase 4: Auth Endpoints  (depende de Fase 3)
+  │
+  ▼
+Fase 4.5: Engine Spike  ← validacion de modelo antes de cementar CRUDs
+  │     │
+  │     └─ Decision: modelo OK / migracion 000004 / refactor mayor
+  ▼
+Fase 5: CRUD Endpoints  (depende de Fase 3, requiere spike validado)
+  │
+  ▼
+Fase 7: Rule Engine completo  (productionizacion de lo del spike)
+  │
+  ▼
+Fase 8: Evaluate Endpoints  (depende de Fases 5 + 7)
+  │
+  ▼
+Fase 6: Audit Log Endpoint  (depende de Fase 5)
+  │
+  ▼
+Fase 9: CI Pipeline + Integracion Final
 ```
 
-**Nota**: La Fase 7 (Engine) se puede hacer en paralelo con las Fases 2-6 porque es codigo puro sin dependencias de storage ni HTTP. Si hay dos developers, uno podria hacer el engine mientras el otro hace auth + API.
+### Justificacion del orden
+
+- **5 → 7 → 8 → 6 → 9**: hace primero la superficie CRUD para tener una plataforma administrable, despues productioniza el engine, despues los evaluate endpoints (que combinan stores + engine), despues el audit query (sobre datos reales generados por CRUDs), y al final CI.
+- **4.5 antes que 5**: valida el modelo de datos antes de comprometerlo en handlers publicos. Si el spike fuerza una migracion 000004, mejor hacerla antes de tener CRUDs entregados que depender de la forma del JSONB.
+- **6 despues que 5**: el audit query es trivial de implementar, pero es mas util tener datos reales para testearlo. Los writes ya se hacen en cada handler de mutacion.
+
+### Paralelizable
+
+- **Fase 2 y Fase 1** se pueden hacer en paralelo si hay dos desarrolladores (auth no depende de storage).
+- **Fase 4.5 (spike) y storage tests pendientes de Fase 4** se pueden paralelizar si hay dos desarrolladores.
 
 ---
 
@@ -1990,13 +2138,14 @@ Fase 0: Foundation
 | 1 — Storage | 14 + 11 test | ~2000-2500 | Media | ~50 test cases |
 | 2 — Auth Core | 7 + 6 test | ~500-600 | Media | ~25 test cases |
 | 3 — Middleware | 12 + 9 test | ~700-900 | Media | ~20 test cases |
-| 4 — Auth Endpoints | 1 + 1 test | ~250-350 | Baja | ~8 test cases |
+| 4 — Auth Endpoints | 1 + 1 test | ~600-800 (con T19/T20 + multi-tenant) | Media | ~20 test cases |
+| 4.5 — Engine Spike | 6 + 5 test | ~400-600 | **Alta** | ~15 test cases (1 por riesgo) |
 | 5 — CRUD | 6 + 6 test | ~900-1200 | Media | ~30 test cases |
-| 6 — Audit | 1 + 1 test | ~100-150 | Baja | ~5 test cases |
-| 7 — Engine | 6 + 5 test | ~700-900 | **Alta** | ~60 test cases |
+| 7 — Engine completo | (los del spike + cierres) | ~300-500 incrementales | **Alta** | ~45 test cases incrementales |
 | 8 — Evaluate | 1 + 1 test | ~250-350 | Media | ~12 test cases |
+| 6 — Audit | 1 + 1 test | ~100-150 | Baja | ~5 test cases |
 | 9 — CI + Smoke | 1 editado | ~50 | Baja | Manual |
-| **Total** | **~60 archivos** | **~6000-8000** | — | **~210 test cases** |
+| **Total** | **~66 archivos** | **~6500-9000** | — | **~225 test cases** |
 
 ---
 

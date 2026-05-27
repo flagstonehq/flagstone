@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/thomas-vilte/flagstone/internal/api/middleware"
 	"github.com/thomas-vilte/flagstone/internal/auth"
 	"github.com/thomas-vilte/flagstone/internal/storage"
 )
@@ -593,4 +594,75 @@ func TestLogout_RevokesRefreshToken(t *testing.T) {
 	refreshRec := httptest.NewRecorder()
 	testServer.Routes().ServeHTTP(refreshRec, refreshReq)
 	assert.Equal(t, http.StatusUnauthorized, refreshRec.Code)
+}
+
+func TestLogin_NoTenantAccess(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+
+	hash, err := auth.HashPassword("pass", testServer.cfg.BcryptCost)
+	require.NoError(t, err)
+
+	user := &storage.User{Email: "no-member@example.com", PasswordHash: &hash}
+	require.NoError(t, testServer.stores.Users.Create(context.Background(), user))
+
+	body := `{"email":"no-member@example.com","password":"pass"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	var errResp middleware.ErrorResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &errResp))
+	assert.Equal(t, "INVALID_CREDENTIALS", errResp.Error.Code)
+}
+
+func TestRefresh_AttackScenario_StolenTokenBurnsLegitSession(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+
+	tenantID, userID, _ := seedAuthUser(t)
+	stolenToken := seedSession(t, tenantID, userID)
+
+	legitReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+	legitReq.AddCookie(&http.Cookie{Name: "refresh_token", Value: stolenToken})
+	legitRec := httptest.NewRecorder()
+	testServer.Routes().ServeHTTP(legitRec, legitReq)
+	require.Equal(t, http.StatusOK, legitRec.Code)
+
+	var legitNewToken string
+	for _, c := range legitRec.Result().Cookies() {
+		if c.Name == "refresh_token" {
+			legitNewToken = c.Value
+			break
+		}
+	}
+	require.NotEmpty(t, legitNewToken)
+
+	attackerReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+	attackerReq.AddCookie(&http.Cookie{Name: "refresh_token", Value: stolenToken})
+	attackerRec := httptest.NewRecorder()
+	testServer.Routes().ServeHTTP(attackerRec, attackerReq)
+	assert.Equal(t, http.StatusUnauthorized, attackerRec.Code)
+
+	legitReq2 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+	legitReq2.AddCookie(&http.Cookie{Name: "refresh_token", Value: legitNewToken})
+	legitRec2 := httptest.NewRecorder()
+	testServer.Routes().ServeHTTP(legitRec2, legitReq2)
+	assert.Equal(t, http.StatusUnauthorized, legitRec2.Code)
+
+	var reuseCount int
+	err := testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM audit_log WHERE action = 'auth.refresh_reuse' AND actor_id = $1`,
+		userID).Scan(&reuseCount)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, reuseCount, 1)
+
+	var sessionCount int
+	err = testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM sessions WHERE user_id = $1`, userID).Scan(&sessionCount)
+	require.NoError(t, err)
+	assert.Equal(t, 0, sessionCount)
 }
