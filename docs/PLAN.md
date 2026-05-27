@@ -1280,15 +1280,15 @@ Cada uno cubre **un riesgo concreto del modelo**, no exhaustividad:
 
 ### Checklist Fase 4.5
 
-- [ ] Crear `internal/engine/types.go` (Rule, ConditionNode, RolloutConfig, FlagConfig, Segment, Reason, EvaluateResult)
-- [ ] Crear `internal/engine/engine.go` (Evaluate — path principal, sin panic recovery)
-- [ ] Crear `internal/engine/conditions.go` (recursive walker: all/any/not/leaf)
-- [ ] Crear `internal/engine/operators.go` (subset: eq, neq, in, gt, contains, segment, exists)
-- [ ] Crear `internal/engine/rollout.go` (FNV-1a, inRollout)
-- [ ] Crear `internal/engine/segments.go` (resolveSegment con cycle detection)
-- [ ] Tests representativos (1 por riesgo, ver tabla arriba)
-- [ ] Decision documentada: modelo OK / migracion 000004 / refactor mayor
-- [ ] Si aplica: migracion 000004 + ajustes en `models.go` + stores afectados
+- [x] Crear `internal/engine/types.go` (Rule, ConditionNode, RolloutConfig, FlagConfig, Segment, Reason, EvaluateResult)
+- [x] Crear `internal/engine/engine.go` (Evaluate — path principal, sin panic recovery)
+- [x] Crear `internal/engine/conditions.go` (recursive walker: all/any/not/leaf)
+- [x] Crear `internal/engine/operators.go` (subset: eq, neq, in, gt, contains, segment, exists)
+- [x] Crear `internal/engine/rollout.go` (FNV-1a, inRollout)
+- [x] Crear `internal/engine/segments.go` (resolveSegment con cycle detection)
+- [x] Tests representativos (1 por riesgo, ver tabla arriba) — 24 tests, todos PASS
+- [x] Decision documentada: modelo OK — el schema actual es compatible, no necesita migracion 000004
+- [ ] Si aplica: migracion 000004 + ajustes en `models.go` + stores afectados — **N/A** (modelo OK)
 - [ ] Confirmar con un PR pequeno antes de empezar Fase 5
 
 ---
