@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/thomas-vilte/flagstone/internal/testutil/pgtest"
 )
 
 var testPool *pgxpool.Pool
@@ -15,25 +16,21 @@ var testPool *pgxpool.Pool
 func TestMain(m *testing.M) {
 	flag.Parse()
 
+	var cleanup func()
 	if !testing.Short() {
-		dsn := os.Getenv("DATABASE_URL")
-		if dsn == "" {
-			dsn = "postgres://flagstone:flagstone_dev@localhost:5432/flagstone?sslmode=disable" //nolint:gosec // default local dev DSN, not a real secret
-		}
-
-		ctx := context.Background()
-		pool, err := NewPool(ctx, dsn)
+		pool, c, err := pgtest.Setup(context.Background(), "flagstone_test_storage", "../../migrations")
 		if err != nil {
 			_, _ = os.Stderr.WriteString("storage_test: " + err.Error() + "\n")
 			os.Exit(1)
 		}
 		testPool = pool
+		cleanup = c
 	}
 
 	code := m.Run()
 
-	if testPool != nil {
-		testPool.Close()
+	if cleanup != nil {
+		cleanup()
 	}
 
 	os.Exit(code)

@@ -233,6 +233,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		if err := txStores.RevokedTokens.Insert(ctx, &storage.RevokedRefreshToken{
 			TokenHash: refreshHash,
 			UserID:    user.ID,
+			TenantID:  session.TenantID,
 			ExpiresAt: session.ExpiresAt,
 		}); err != nil {
 			return fmt.Errorf("revoke old token: %w", err)
@@ -303,6 +304,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 				if err := txStores.RevokedTokens.Insert(ctx, &storage.RevokedRefreshToken{
 					TokenHash: refreshHash,
 					UserID:    session.UserID,
+					TenantID:  session.TenantID,
 					ExpiresAt: session.ExpiresAt,
 				}); err != nil {
 					return err
@@ -335,6 +337,7 @@ func (s *Server) handleRefreshReuse(ctx context.Context, w http.ResponseWriter, 
 		s.logger.Error("refresh reuse: delete sessions", zap.Error(err))
 	}
 	if err := s.stores.AuditLogs.Insert(ctx, &storage.AuditLogEntry{
+		TenantID:     revoked.TenantID,
 		ActorID:      uuidPtr(revoked.UserID),
 		ActorType:    "user",
 		Action:       "auth.refresh_reuse",

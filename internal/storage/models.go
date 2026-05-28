@@ -141,6 +141,7 @@ type RevokedRefreshToken struct {
 	ID        uuid.UUID
 	TokenHash string
 	UserID    uuid.UUID
+	TenantID  uuid.UUID
 	RevokedAt time.Time
 	ExpiresAt time.Time
 }

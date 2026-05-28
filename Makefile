@@ -1,7 +1,7 @@
 # =============================================================================
 # Flagstone
 # =============================================================================
-.PHONY: help build run test test-int lint fmt migrate migrate-down setup clean docker-build docker-run
+.PHONY: help build run test test-int test-int-v test-cover lint fmt migrate migrate-down setup clean docker-build docker-run
 
 BINARY := bin/flagstone
 MODULE := github.com/thomas-vilte/flagstone
@@ -39,11 +39,19 @@ vet:
 test:
 	go test -race -short ./...
 
+# Integration tests. Packages run in parallel safely thanks to per-package
+# Postgres schema isolation in internal/testutil/pgtest — each package owns
+# its own schema and migrations run there.
 test-int:
-	go test -race -count=1 -p 1 ./...
+	go test -race -count=1 ./...
+
+# Same as test-int, but verbose. Use during handler development to see which
+# tests ran and what failed.
+test-int-v:
+	go test -race -count=1 -v ./...
 
 test-cover:
-	go test -race -coverprofile=coverage.out -p 1 ./...
+	go test -race -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
 

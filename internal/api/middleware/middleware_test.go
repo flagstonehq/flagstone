@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"github.com/thomas-vilte/flagstone/internal/storage"
+	"github.com/thomas-vilte/flagstone/internal/testutil/pgtest"
 )
 
 var testStores *storage.Stores
@@ -18,26 +19,20 @@ var testPool *pgxpool.Pool
 func TestMain(m *testing.M) {
 	flag.Parse()
 
+	var cleanup func()
 	if !testing.Short() {
-		dsn := os.Getenv("DATABASE_URL")
-		if dsn == "" {
-			dsn = "postgres://flagstone:flagstone_dev@localhost:5432/flagstone?sslmode=disable"
-		}
-
-		ctx := context.Background()
-		pool, err := pgxpool.New(ctx, dsn)
+		pool, c, err := pgtest.Setup(context.Background(), "flagstone_test_middleware", "../../../migrations")
 		if err == nil {
-			if err := pool.Ping(ctx); err == nil {
-				testPool = pool
-				testStores = storage.NewStores(pool)
-			}
+			testPool = pool
+			cleanup = c
+			testStores = storage.NewStores(pool)
 		}
 	}
 
 	code := m.Run()
 
-	if testPool != nil {
-		testPool.Close()
+	if cleanup != nil {
+		cleanup()
 	}
 
 	os.Exit(code)
