@@ -1447,20 +1447,28 @@ El `key` solo aparece en esta response. Nunca se almacena ni se retorna de nuevo
 
 ### Checklist Fase 5
 
-- [ ] Crear `internal/api/handlers/projects.go` (POST, GET, GET/:slug, PUT/:slug)
-- [ ] Crear `internal/api/handlers/environments.go` (GET, POST)
-- [ ] Crear `internal/api/handlers/apikeys.go` (POST, GET, DELETE/:id)
-- [ ] Crear `internal/api/handlers/flags.go` (POST, GET, GET/:key, PUT/:key, DELETE/:key)
-- [ ] Crear `internal/api/handlers/flag_envs.go` (PUT con OCC)
-- [ ] Crear `internal/api/handlers/segments.go` (POST, GET, GET/:key, PUT/:key, DELETE/:key)
-- [ ] Tests: projects CRUD, auto-env creation, tenant-scoped
-- [ ] Tests: environments CRUD
-- [ ] Tests: API keys CRUD, raw key solo una vez, revoke
-- [ ] Tests: flags CRUD, auto-flag_envs, key validation
-- [ ] Tests: flag_envs OCC version conflict
-- [ ] Tests: segments CRUD
-- [ ] Tests: RBAC enforcement por endpoint
-- [ ] Tests: cross-tenant isolation
+- [x] Crear `internal/api/projects.go` (POST, GET, GET/:slug, PUT/:slug)
+- [x] Crear `internal/api/environments.go` (GET, POST, DELETE owner-only)
+- [x] Crear `internal/api/apikeys.go` (POST, GET, DELETE/:id)
+- [x] Crear `internal/api/flags.go` (POST, GET, GET/:key, PUT/:key, DELETE/:key)
+- [x] Crear `internal/api/flag_envs.go` (GET + PUT con OCC)
+- [x] Crear `internal/api/segments.go` (POST, GET, GET/:key, PUT/:key, DELETE/:key)
+- [x] Tests: projects CRUD, auto-env creation (3 envs verificados), tenant-scoped
+- [x] Tests: environments CRUD
+- [x] Tests: API keys CRUD, raw key solo una vez, revoke
+- [x] Tests: flags CRUD, auto-flag_envs verificado, key validation
+- [x] Tests: flag_envs OCC version conflict
+- [x] Tests: segments CRUD
+- [x] Tests: RBAC enforcement por endpoint (`rbac_test.go` — matriz de roles × endpoint)
+- [x] Tests: cross-tenant isolation (`cross_tenant_test.go` — projects, flags, segments, envs, apikeys)
+- [x] Audit logs en todas las mutaciones (project.*, flag.*, segment.*, environment.*, apikey.*)
+- [x] Validación description max 2000 chars en flags y segments
+- [x] DELETE environment handler restringido a Owner+ (cascada borra flag_envs y api_keys)
+
+### Lo que queda fuera del scope de Fase 5
+
+- **Paginación** en list endpoints — el plan menciona `limit 1-100, default 20`, pero los volúmenes esperados en MVP (decenas de flags por proyecto) no lo justifican. Se agrega cuando un cliente lo pida.
+- **JSONB rule validation** (max depth 10, max 50 nodos, max 64KB, operator whitelist) — la validación estructural de Rules sucede en la frontera del engine (Fase 7), no en los CRUDs. Por ahora solo se valida `json.Valid`.
 
 ---
 
