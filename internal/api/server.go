@@ -9,6 +9,7 @@ import (
 	"github.com/thomas-vilte/flagstone/internal/api/middleware"
 	"github.com/thomas-vilte/flagstone/internal/auth"
 	"github.com/thomas-vilte/flagstone/internal/config"
+	"github.com/thomas-vilte/flagstone/internal/engine"
 	"github.com/thomas-vilte/flagstone/internal/storage"
 	"go.uber.org/zap"
 )
@@ -25,6 +26,7 @@ type Server struct {
 	dbPool *pgxpool.Pool
 	cfg    *config.Config
 	logger *zap.Logger
+	engine *engine.Engine
 
 	// fakePasswordHash is a precomputed bcrypt hash used to keep login
 	// response times constant when the email isn't found in the DB. Without
@@ -43,6 +45,7 @@ func NewServer(stores *storage.Stores, dbPool *pgxpool.Pool, cfg *config.Config,
 		dbPool:           dbPool,
 		cfg:              cfg,
 		logger:           logger,
+		engine:           engine.New(logger),
 		fakePasswordHash: fake,
 	}
 }
@@ -287,6 +290,26 @@ func (s *Server) Routes() http.Handler {
 		middleware.RequireRole(auth.RoleAdmin),
 	)
 	mux.Handle("DELETE /api/v1/projects/{slug}/environments/{envSlug}/apikeys/{id}", recoverMW(apikeysRevokeHandler))
+
+	evaluateSingleHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleEvaluateFlag),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthAPIKey(s.stores),
+	)
+	mux.Handle("POST /api/v1/evaluate/flags/{key}", recoverMW(evaluateSingleHandler))
+
+	evaluateBulkHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleEvaluateFlags),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthAPIKey(s.stores),
+	)
+	mux.Handle("POST /api/v1/evaluate/flags", recoverMW(evaluateBulkHandler))
 
 	return mux
 }
