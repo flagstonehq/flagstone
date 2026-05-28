@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/thomas-vilte/flagstone/internal/auth"
 	"github.com/thomas-vilte/flagstone/internal/storage"
 )
 
@@ -201,6 +202,46 @@ func TestRevokeAPIKey_NotFound(t *testing.T) {
 	testServer.Routes().ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestAPIKeys_CrossTenantIsolation(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "api_keys", "environments", "flags", "segments", "projects", "tenant_members", "users", "tenants")
+
+	tenantA := &storage.Tenant{Slug: "ak-tenant-a-" + uuid.New().String()[:8], Name: "Tenant A", Plan: "free"}
+	require.NoError(t, testServer.stores.Tenants.Create(context.Background(), tenantA))
+	tenantB := &storage.Tenant{Slug: "ak-tenant-b-" + uuid.New().String()[:8], Name: "Tenant B", Plan: "free"}
+	require.NoError(t, testServer.stores.Tenants.Create(context.Background(), tenantB))
+
+	userA := &storage.User{Email: "ak-a@example.com"}
+	require.NoError(t, testServer.stores.Users.Create(context.Background(), userA))
+	member := &storage.TenantMember{TenantID: tenantA.ID, UserID: userA.ID, Role: "admin"}
+	require.NoError(t, testServer.stores.Members.Add(context.Background(), member))
+
+	tokenA, err := auth.GenerateAccessToken(userA.ID, tenantA.ID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL)
+	require.NoError(t, err)
+
+	projA := &storage.Project{TenantID: tenantA.ID, Slug: "proj-a", Name: "Project A"}
+	require.NoError(t, testServer.stores.Projects.Create(context.Background(), projA))
+	projB := &storage.Project{TenantID: tenantB.ID, Slug: "proj-b", Name: "Project B"}
+	require.NoError(t, testServer.stores.Projects.Create(context.Background(), projB))
+
+	envA := &storage.Environment{ProjectID: projA.ID, Slug: "prod", Name: "Prod"}
+	require.NoError(t, testServer.stores.Environments.Create(context.Background(), envA))
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/projects/proj-a/environments/prod/apikeys", nil)
+	req.Header.Set(authBearer(tokenA))
+	rec := httptest.NewRecorder()
+	testServer.Routes().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	req = httptest.NewRequest(http.MethodGet,
+		"/api/v1/projects/proj-b/environments/prod/apikeys", nil)
+	req.Header.Set(authBearer(tokenA))
+	rec = httptest.NewRecorder()
+	testServer.Routes().ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNotFound, rec.Code, "should not see another tenant's project")
 }
 
 func TestAPIKeys_RequiresAuth(t *testing.T) {
