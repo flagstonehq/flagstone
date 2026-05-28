@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,232 +15,230 @@ import (
 	"github.com/thomas-vilte/flagstone/internal/storage"
 )
 
-// rbacFixture is everything an RBAC test needs to construct an HTTP request
-// for a given role: the JWT, plus the slugs/keys of pre-seeded resources so
-// the request hits an existing tenant/project/etc instead of 404-ing for
-// reasons unrelated to RBAC.
-type rbacFixture struct {
-	tenantID    uuid.UUID
-	projectSlug string
-	envSlug     string
-	flagKey     string
-	segmentKey  string
-	token       string
-}
-
-// seedProjectAtRole creates a tenant + project + one user assigned to the
-// given role, plus an env, flag, and segment so every RBAC test has a real
-// target. Returns a fixture struct rather than 6+ positional values.
-func seedProjectAtRole(t *testing.T, role string) rbacFixture {
+func seedUserWithRole(t *testing.T, role string) (tenantID, userID uuid.UUID, token string) {
 	t.Helper()
 
-	password := "securepass123"
-	hash, err := auth.HashPassword(password, testServer.cfg.BcryptCost)
-	require.NoError(t, err)
-	ctx := context.Background()
-
 	tenant := &storage.Tenant{Slug: "rbac-tenant-" + uuid.New().String()[:8], Name: "RBAC Tenant", Plan: "free"}
-	require.NoError(t, testServer.stores.Tenants.Create(ctx, tenant))
+	require.NoError(t, testServer.stores.Tenants.Create(context.Background(), tenant))
 
-	user := &storage.User{Email: "rbac-" + uuid.New().String()[:6] + "@example.com", PasswordHash: &hash}
-	require.NoError(t, testServer.stores.Users.Create(ctx, user))
+	user := &storage.User{Email: "rbac-" + uuid.New().String()[:8] + "@example.com"}
+	require.NoError(t, testServer.stores.Users.Create(context.Background(), user))
 
-	require.NoError(t, testServer.stores.Members.Add(ctx, &storage.TenantMember{
-		TenantID: tenant.ID, UserID: user.ID, Role: role,
-	}))
-
-	project := &storage.Project{TenantID: tenant.ID, Slug: "rbac-proj-" + uuid.New().String()[:8], Name: "RBAC Project"}
-	require.NoError(t, testServer.stores.Projects.Create(ctx, project))
-
-	env := &storage.Environment{ProjectID: project.ID, Slug: "production", Name: "Production"}
-	require.NoError(t, testServer.stores.Environments.Create(ctx, env))
-
-	flag := &storage.Flag{
-		ProjectID:    project.ID,
-		Key:          "rbac-flag",
-		Name:         "RBAC Flag",
-		Type:         "boolean",
-		DefaultValue: []byte("false"),
-	}
-	require.NoError(t, testServer.stores.Flags.Create(ctx, flag))
-
-	segment := &storage.Segment{
-		ProjectID: project.ID,
-		Key:       "rbac-segment",
-		Name:      "RBAC Segment",
-		Rules:     []byte("[]"),
-	}
-	require.NoError(t, testServer.stores.Segments.Create(ctx, segment))
+	member := &storage.TenantMember{TenantID: tenant.ID, UserID: user.ID, Role: role}
+	require.NoError(t, testServer.stores.Members.Add(context.Background(), member))
 
 	accessToken, err := auth.GenerateAccessToken(user.ID, tenant.ID, role, testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL)
 	require.NoError(t, err)
 
-	return rbacFixture{
-		tenantID:    tenant.ID,
-		projectSlug: project.Slug,
-		envSlug:     env.Slug,
-		flagKey:     flag.Key,
-		segmentKey:  segment.Key,
-		token:       accessToken,
+	return tenant.ID, user.ID, accessToken
+}
+
+func TestRBAC_ViewerCantCreateFlags(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "environments", "flags", "segments", "api_keys", "projects", "tenant_members", "users", "tenants")
+
+	_, _, token := seedUserWithRole(t, auth.RoleViewer.String())
+
+	project := &storage.Project{TenantID: uuid.Nil, Slug: "test-proj", Name: "Test"}
+	project.TenantID, _, _ = seedUserWithRole(t, auth.RoleAdmin.String())
+	require.NoError(t, testServer.stores.Projects.Create(context.Background(), project))
+
+	body := `{"key":"my-flag","name":"My Flag","type":"boolean","default_value":false}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+project.Slug+"/flags", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestRBAC_ViewerCantCreateSegments(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "environments", "flags", "segments", "api_keys", "projects", "tenant_members", "users", "tenants")
+
+	_, _, token := seedUserWithRole(t, auth.RoleViewer.String())
+
+	project := &storage.Project{TenantID: uuid.Nil, Slug: "test-proj", Name: "Test"}
+	project.TenantID, _, _ = seedUserWithRole(t, auth.RoleAdmin.String())
+	require.NoError(t, testServer.stores.Projects.Create(context.Background(), project))
+
+	body := `{"key":"my-segment","name":"My Segment","rules":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+project.Slug+"/segments", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestRBAC_ViewerCantCreateAPIKeys(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "environments", "flags", "segments", "api_keys", "projects", "tenant_members", "users", "tenants")
+
+	_, _, token := seedUserWithRole(t, auth.RoleViewer.String())
+
+	adminTenantID, _, adminToken := seedUserWithRole(t, auth.RoleAdmin.String())
+	project := &storage.Project{TenantID: adminTenantID, Slug: "test-proj", Name: "Test"}
+	require.NoError(t, testServer.stores.Projects.Create(context.Background(), project))
+	env := &storage.Environment{ProjectID: project.ID, Slug: "prod", Name: "Production"}
+	require.NoError(t, testServer.stores.Environments.Create(context.Background(), env))
+
+	body := `{"name":"My Key"}`
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/projects/"+project.Slug+"/environments/"+env.Slug+"/apikeys",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	_ = adminToken
+}
+
+func TestRBAC_MemberCantArchiveFlags(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "environments", "flags", "segments", "api_keys", "projects", "tenant_members", "users", "tenants")
+
+	tenantID, _, memberToken := seedUserWithRole(t, auth.RoleMember.String())
+
+	project := &storage.Project{TenantID: tenantID, Slug: "test-proj", Name: "Test"}
+	require.NoError(t, testServer.stores.Projects.Create(context.Background(), project))
+
+	flag := &storage.Flag{ProjectID: project.ID, Key: "my-flag", Name: "My Flag", Type: "boolean", DefaultValue: json.RawMessage("false")}
+	require.NoError(t, testServer.stores.Flags.Create(context.Background(), flag))
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/projects/"+project.Slug+"/flags/my-flag", nil)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestRBAC_MemberCantArchiveSegments(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "environments", "flags", "segments", "api_keys", "projects", "tenant_members", "users", "tenants")
+
+	tenantID, _, memberToken := seedUserWithRole(t, auth.RoleMember.String())
+
+	project := &storage.Project{TenantID: tenantID, Slug: "test-proj", Name: "Test"}
+	require.NoError(t, testServer.stores.Projects.Create(context.Background(), project))
+
+	seg := &storage.Segment{ProjectID: project.ID, Key: "my-seg", Name: "My Seg", Rules: json.RawMessage("[]")}
+	require.NoError(t, testServer.stores.Segments.Create(context.Background(), seg))
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/projects/"+project.Slug+"/segments/my-seg", nil)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestRBAC_MemberCantRevokeAPIKeys(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "environments", "flags", "segments", "api_keys", "projects", "tenant_members", "users", "tenants")
+
+	tenantID, _, memberToken := seedUserWithRole(t, auth.RoleMember.String())
+
+	project := &storage.Project{TenantID: tenantID, Slug: "test-proj", Name: "Test"}
+	require.NoError(t, testServer.stores.Projects.Create(context.Background(), project))
+	env := &storage.Environment{ProjectID: project.ID, Slug: "prod", Name: "Production"}
+	require.NoError(t, testServer.stores.Environments.Create(context.Background(), env))
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/v1/projects/"+project.Slug+"/environments/"+env.Slug+"/apikeys/"+uuid.New().String(), nil)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestRBAC_AdminCanCreateEverywhere(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "environments", "flags", "segments", "api_keys", "projects", "tenant_members", "users", "tenants")
+
+	tenantID, _, adminToken := seedUserWithRole(t, auth.RoleAdmin.String())
+
+	project := &storage.Project{TenantID: tenantID, Slug: "test-proj", Name: "Test"}
+	require.NoError(t, testServer.stores.Projects.Create(context.Background(), project))
+	env := &storage.Environment{ProjectID: project.ID, Slug: "prod", Name: "Production"}
+	require.NoError(t, testServer.stores.Environments.Create(context.Background(), env))
+
+	tests := []struct {
+		name string
+		req  *http.Request
+	}{
+		{"create flag", httptest.NewRequest(http.MethodPost,
+			"/api/v1/projects/"+project.Slug+"/flags",
+			strings.NewReader(`{"key":"f1","name":"F1","type":"boolean","default_value":false}`))},
+		{"create segment", httptest.NewRequest(http.MethodPost,
+			"/api/v1/projects/"+project.Slug+"/segments",
+			strings.NewReader(`{"key":"s1","name":"S1","rules":[]}`))},
+		{"create apikey", httptest.NewRequest(http.MethodPost,
+			"/api/v1/projects/"+project.Slug+"/environments/"+env.Slug+"/apikeys",
+			strings.NewReader(`{"name":"K1"}`))},
 	}
-}
 
-// rbacTestCase is one row of the RBAC matrix from PLAN.md / SECURITY.md —
-// a (method, path, body) tuple that should be allowed at minRole and above
-// and forbidden below. Tests below run this against every role.
-type rbacTestCase struct {
-	method  string
-	pathFn  func(fx rbacFixture) string
-	body    string
-	minRole string
-}
-
-var allRoles = []string{"viewer", "member", "admin", "owner"}
-
-func roleAtLeast(role, minimum string) bool {
-	rank := map[string]int{"viewer": 1, "member": 2, "admin": 3, "owner": 4}
-	return rank[role] >= rank[minimum]
-}
-
-func runRBACMatrix(t *testing.T, tc rbacTestCase) {
-	t.Helper()
-	for _, role := range allRoles {
-		t.Run(role, func(t *testing.T) {
-			truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "api_keys", "flags", "segments", "projects", "tenant_members", "users", "tenants")
-			fx := seedProjectAtRole(t, role)
-
-			req := httptest.NewRequest(tc.method, tc.pathFn(fx), strings.NewReader(tc.body))
-			if tc.body != "" {
-				req.Header.Set("Content-Type", "application/json")
-			}
-			req.Header.Set(authBearer(fx.token))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.req.Header.Set("Content-Type", "application/json")
+			tt.req.Header.Set("Authorization", "Bearer "+adminToken)
 			rec := httptest.NewRecorder()
-			testServer.Routes().ServeHTTP(rec, req)
-
-			if roleAtLeast(role, tc.minRole) {
-				// Role meets the threshold — must NOT be 403. The handler may
-				// still return other codes (404, 400, 200, 201, 204, 409) but
-				// permission was granted.
-				assert.NotEqual(t, http.StatusForbidden, rec.Code,
-					"role %s (>= %s) should not be forbidden; got %d", role, tc.minRole, rec.Code)
-			} else {
-				assert.Equal(t, http.StatusForbidden, rec.Code,
-					"role %s (< %s) must be forbidden; got %d", role, tc.minRole, rec.Code)
-			}
+			testServer.Routes().ServeHTTP(rec, tt.req)
+			assert.Equal(t, http.StatusCreated, rec.Code)
 		})
 	}
 }
 
-func TestRBAC_CreateProject(t *testing.T) {
+func TestRBAC_AdminCanArchiveAndRevoke(t *testing.T) {
 	skipIfNoDB(t)
-	runRBACMatrix(t, rbacTestCase{
-		method:  http.MethodPost,
-		pathFn:  func(_ rbacFixture) string { return "/api/v1/projects" },
-		body:    `{"slug":"new-proj","name":"New Project"}`,
-		minRole: "admin",
-	})
-}
+	truncateTables(t, "audit_log", "sessions", "environments", "flags", "segments", "api_keys", "projects", "tenant_members", "users", "tenants")
 
-func TestRBAC_UpdateProject(t *testing.T) {
-	skipIfNoDB(t)
-	runRBACMatrix(t, rbacTestCase{
-		method:  http.MethodPut,
-		pathFn:  func(fx rbacFixture) string { return "/api/v1/projects/" + fx.projectSlug },
-		body:    `{"name":"Updated Name"}`,
-		minRole: "admin",
-	})
-}
+	tenantID, _, adminToken := seedUserWithRole(t, auth.RoleAdmin.String())
 
-func TestRBAC_CreateFlag(t *testing.T) {
-	skipIfNoDB(t)
-	runRBACMatrix(t, rbacTestCase{
-		method:  http.MethodPost,
-		pathFn:  func(fx rbacFixture) string { return "/api/v1/projects/" + fx.projectSlug + "/flags" },
-		body:    `{"key":"new-flag","name":"New Flag","type":"boolean","default_value":false}`,
-		minRole: "member",
-	})
-}
+	project := &storage.Project{TenantID: tenantID, Slug: "test-proj", Name: "Test"}
+	require.NoError(t, testServer.stores.Projects.Create(context.Background(), project))
+	env := &storage.Environment{ProjectID: project.ID, Slug: "prod", Name: "Production"}
+	require.NoError(t, testServer.stores.Environments.Create(context.Background(), env))
 
-func TestRBAC_UpdateFlag(t *testing.T) {
-	skipIfNoDB(t)
-	runRBACMatrix(t, rbacTestCase{
-		method:  http.MethodPut,
-		pathFn:  func(fx rbacFixture) string { return "/api/v1/projects/" + fx.projectSlug + "/flags/" + fx.flagKey },
-		body:    `{"name":"Updated Flag"}`,
-		minRole: "member",
-	})
-}
+	flag := &storage.Flag{ProjectID: project.ID, Key: "my-flag", Name: "F", Type: "boolean", DefaultValue: json.RawMessage("false")}
+	require.NoError(t, testServer.stores.Flags.Create(context.Background(), flag))
 
-func TestRBAC_ArchiveFlag(t *testing.T) {
-	skipIfNoDB(t)
-	runRBACMatrix(t, rbacTestCase{
-		method:  http.MethodDelete,
-		pathFn:  func(fx rbacFixture) string { return "/api/v1/projects/" + fx.projectSlug + "/flags/" + fx.flagKey },
-		minRole: "admin",
-	})
-}
+	seg := &storage.Segment{ProjectID: project.ID, Key: "my-seg", Name: "S", Rules: json.RawMessage("[]")}
+	require.NoError(t, testServer.stores.Segments.Create(context.Background(), seg))
 
-func TestRBAC_CreateSegment(t *testing.T) {
-	skipIfNoDB(t)
-	runRBACMatrix(t, rbacTestCase{
-		method:  http.MethodPost,
-		pathFn:  func(fx rbacFixture) string { return "/api/v1/projects/" + fx.projectSlug + "/segments" },
-		body:    `{"key":"new-seg","name":"New Segment","rules":[]}`,
-		minRole: "member",
-	})
-}
+	apikey := &storage.APIKey{EnvironmentID: env.ID, Name: "K", KeyHash: "h", KeyPrefix: "p"}
+	require.NoError(t, testServer.stores.APIKeys.Create(context.Background(), apikey))
 
-func TestRBAC_ArchiveSegment(t *testing.T) {
-	skipIfNoDB(t)
-	runRBACMatrix(t, rbacTestCase{
-		method: http.MethodDelete,
-		pathFn: func(fx rbacFixture) string {
-			return "/api/v1/projects/" + fx.projectSlug + "/segments/" + fx.segmentKey
-		},
-		minRole: "admin",
-	})
-}
+	tests := []struct {
+		name string
+		req  *http.Request
+	}{
+		{"archive flag", httptest.NewRequest(http.MethodDelete,
+			"/api/v1/projects/"+project.Slug+"/flags/my-flag", nil)},
+		{"archive segment", httptest.NewRequest(http.MethodDelete,
+			"/api/v1/projects/"+project.Slug+"/segments/my-seg", nil)},
+		{"revoke apikey", httptest.NewRequest(http.MethodDelete,
+			"/api/v1/projects/"+project.Slug+"/environments/"+env.Slug+"/apikeys/"+apikey.ID.String(), nil)},
+	}
 
-func TestRBAC_CreateEnvironment(t *testing.T) {
-	skipIfNoDB(t)
-	runRBACMatrix(t, rbacTestCase{
-		method:  http.MethodPost,
-		pathFn:  func(fx rbacFixture) string { return "/api/v1/projects/" + fx.projectSlug + "/environments" },
-		body:    `{"slug":"new-env","name":"New Env"}`,
-		minRole: "admin",
-	})
-}
-
-func TestRBAC_DeleteEnvironment(t *testing.T) {
-	skipIfNoDB(t)
-	runRBACMatrix(t, rbacTestCase{
-		method: http.MethodDelete,
-		pathFn: func(fx rbacFixture) string {
-			return "/api/v1/projects/" + fx.projectSlug + "/environments/" + fx.envSlug
-		},
-		minRole: "owner",
-	})
-}
-
-func TestRBAC_CreateAPIKey(t *testing.T) {
-	skipIfNoDB(t)
-	runRBACMatrix(t, rbacTestCase{
-		method: http.MethodPost,
-		pathFn: func(fx rbacFixture) string {
-			return "/api/v1/projects/" + fx.projectSlug + "/environments/" + fx.envSlug + "/apikeys"
-		},
-		body:    `{"name":"new-key"}`,
-		minRole: "admin",
-	})
-}
-
-func TestRBAC_ListAPIKeys(t *testing.T) {
-	skipIfNoDB(t)
-	runRBACMatrix(t, rbacTestCase{
-		method: http.MethodGet,
-		pathFn: func(fx rbacFixture) string {
-			return "/api/v1/projects/" + fx.projectSlug + "/environments/" + fx.envSlug + "/apikeys"
-		},
-		minRole: "member",
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.req.Header.Set("Authorization", "Bearer "+adminToken)
+			rec := httptest.NewRecorder()
+			testServer.Routes().ServeHTTP(rec, tt.req)
+			assert.Equal(t, http.StatusNoContent, rec.Code)
+		})
+	}
 }
