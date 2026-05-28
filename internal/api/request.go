@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
+	"time"
 )
 
 // Sentinel errors returned by DecodeJSON for common failure modes.
@@ -72,3 +74,14 @@ func hasJSONContentType(ct string) bool {
 	ct = strings.TrimSpace(ct)
 	return ct == "application/json"
 }
+
+const (
+	slugPattern    = `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
+	flagKeyPattern = `^[a-z0-9][a-z0-9_-]*[a-z0-9]$`
+	timeFormat     = time.RFC3339Nano
+)
+
+var (
+	slugRegex    = regexp.MustCompile(slugPattern)
+	flagKeyRegex = regexp.MustCompile(flagKeyPattern)
+)

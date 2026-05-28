@@ -86,6 +86,208 @@ func (s *Server) Routes() http.Handler {
 	)
 	mux.Handle("POST /api/v1/auth/logout", recoverMW(logoutHandler))
 
+	projectsCreateHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleCreateProject),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleAdmin),
+	)
+	mux.Handle("POST /api/v1/projects", recoverMW(projectsCreateHandler))
+	projectsListHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleListProjects),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleViewer),
+	)
+	mux.Handle("GET /api/v1/projects", recoverMW(projectsListHandler))
+	projectsGetHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleGetProject),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleViewer),
+	)
+	mux.Handle("GET /api/v1/projects/{slug}", recoverMW(projectsGetHandler))
+	projectsUpdateHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleUpdateProject),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleAdmin),
+	)
+	mux.Handle("PUT /api/v1/projects/{slug}", recoverMW(projectsUpdateHandler))
+
+	envsListHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleListEnvironments),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleViewer),
+	)
+	mux.Handle("GET /api/v1/projects/{slug}/environments", recoverMW(envsListHandler))
+
+	envsCreateHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleCreateEnvironment),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleAdmin),
+	)
+	mux.Handle("POST /api/v1/projects/{slug}/environments", recoverMW(envsCreateHandler))
+	envsDeleteHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleDeleteEnvironment),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleOwner),
+	)
+	mux.Handle("DELETE /api/v1/projects/{slug}/environments/{envSlug}", recoverMW(envsDeleteHandler))
+
+	flagsCreateHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleCreateFlag),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleMember),
+	)
+	mux.Handle("POST /api/v1/projects/{slug}/flags", recoverMW(flagsCreateHandler))
+	flagsListHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleListFlags),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleViewer),
+	)
+	mux.Handle("GET /api/v1/projects/{slug}/flags", recoverMW(flagsListHandler))
+	flagsGetHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleGetFlag),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleViewer),
+	)
+	mux.Handle("GET /api/v1/projects/{slug}/flags/{key}", recoverMW(flagsGetHandler))
+	flagsUpdateHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleUpdateFlag),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleMember),
+	)
+	mux.Handle("PUT /api/v1/projects/{slug}/flags/{key}", recoverMW(flagsUpdateHandler))
+	flagsArchiveHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleArchiveFlag),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleAdmin),
+	)
+	mux.Handle("DELETE /api/v1/projects/{slug}/flags/{key}", recoverMW(flagsArchiveHandler))
+
+	flagEnvGetHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleGetFlagEnvironment),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleViewer),
+	)
+	mux.Handle("GET /api/v1/projects/{slug}/flags/{key}/environments/{envSlug}", recoverMW(flagEnvGetHandler))
+
+	flagEnvUpdateHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleUpdateFlagEnvironment),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleMember),
+	)
+	mux.Handle("PUT /api/v1/projects/{slug}/flags/{key}/environments/{envSlug}", recoverMW(flagEnvUpdateHandler))
+
+	segmentsCreateHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleCreateSegment),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleMember),
+	)
+	mux.Handle("POST /api/v1/projects/{slug}/segments", recoverMW(segmentsCreateHandler))
+	segmentsListHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleListSegments),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleViewer),
+	)
+	mux.Handle("GET /api/v1/projects/{slug}/segments", recoverMW(segmentsListHandler))
+	segmentsGetHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleGetSegment),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleViewer),
+	)
+	mux.Handle("GET /api/v1/projects/{slug}/segments/{key}", recoverMW(segmentsGetHandler))
+	segmentsUpdateHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleUpdateSegment),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleMember),
+	)
+	mux.Handle("PUT /api/v1/projects/{slug}/segments/{key}", recoverMW(segmentsUpdateHandler))
+	segmentsArchiveHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleArchiveSegment),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleAdmin),
+	)
+	mux.Handle("DELETE /api/v1/projects/{slug}/segments/{key}", recoverMW(segmentsArchiveHandler))
+
+	apikeysCreateHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleCreateAPIKey),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleAdmin),
+	)
+	mux.Handle("POST /api/v1/projects/{slug}/environments/{envSlug}/apikeys", recoverMW(apikeysCreateHandler))
+	apikeysListHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleListAPIKeys),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleMember),
+	)
+	mux.Handle("GET /api/v1/projects/{slug}/environments/{envSlug}/apikeys", recoverMW(apikeysListHandler))
+	apikeysRevokeHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleRevokeAPIKey),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleAdmin),
+	)
+	mux.Handle("DELETE /api/v1/projects/{slug}/environments/{envSlug}/apikeys/{id}", recoverMW(apikeysRevokeHandler))
+
 	return mux
 }
 
