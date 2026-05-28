@@ -1965,13 +1965,19 @@ Response 200:
 
 ### Checklist Fase 8
 
-- [ ] Crear `internal/api/handlers/evaluate.go` (single + bulk evaluation)
-- [ ] Implementar context validation (max keys, max length, tipos)
-- [ ] Implementar eager loading (flags JOIN flag_environments, segments)
-- [ ] Tests: single eval (existe, not found, disabled, rule match, rollout)
-- [ ] Tests: bulk eval (todos los flags, formato correcto)
-- [ ] Tests: auth (API key invalido, revocado)
-- [ ] Tests: context validation (too many keys, value too long, invalid type)
+- [x] Crear `internal/api/evaluate.go` (single + bulk evaluation)
+- [x] Implementar context validation (max 100 keys, 128 chars/key, 1024 chars/value, tipos: string/float64/bool/[]string)
+- [x] Implementar eager loading: bulk usa `ListByEnvironment` (JOIN en una query), single carga flag + flagEnv + segments
+- [x] `parseDefaultValue` tipado por `flag.Type` para que el engine reciba el tipo correcto
+- [x] `buildFlagConfig` + `buildFlagConfigFromJoined` — dos helpers limpios para los dos flujos
+- [x] Tests: single eval (flag not found, disabled, rule match, default value)
+- [x] Tests: bulk eval (success, formato correcto con environment/evaluated_at)
+- [x] Tests: auth (API key invalido → 401)
+- [x] Tests: context validation (too many keys, value too long, invalid type)
+
+- [x] Test: API key revocado → 401 (`TestEvaluateFlag_RevokedAPIKey`)
+- [x] Test: rollout deterministico end-to-end via HTTP (`TestEvaluateFlag_RolloutDeterministic` — 10 llamadas al mismo user, mismo resultado)
+- [x] Test: sin header Authorization → 401 (`TestEvaluateFlag_NoAuthHeader`)
 
 ---
 
