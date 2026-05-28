@@ -52,17 +52,20 @@ linters:
           - gosec
           - noctx
       - path: '_test\.go'
-        text: 'httpNoBody'
+        text: "httpNoBody"
         linters:
           - gocritic
       - path: '_test\.go'
-        text: 'unused-parameter'
+        text: "unused-parameter"
         linters:
           - revive
       - path: '_test\.go'
-        text: 'SA4006'
+        text: "SA4006"
         linters:
           - staticcheck
+      - path: "internal/testutil/"
+        linters:
+          - gosec
 
 formatters:
   enable:

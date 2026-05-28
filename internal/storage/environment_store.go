@@ -139,3 +139,19 @@ func (s *EnvironmentStore) ListByProject(ctx context.Context, projectID uuid.UUI
 	}
 	return environments, nil
 }
+
+// DeleteByID hard-deletes an environment. Foreign-key cascades drop all
+// flag_environments and api_keys scoped to it — callers should treat this
+// as destructive and gate it behind Owner-only RBAC.
+// Returns ErrEnvironmentNotFound if no row matches.
+func (s *EnvironmentStore) DeleteByID(ctx context.Context, id uuid.UUID) error {
+	const query = `DELETE FROM environments WHERE id = $1`
+	tag, err := s.db.Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("storage.EnvironmentStore.DeleteByID: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrEnvironmentNotFound
+	}
+	return nil
+}

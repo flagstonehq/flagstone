@@ -28,6 +28,7 @@ func TestRevokedTokenStore_Insert(t *testing.T) {
 	token := &RevokedRefreshToken{
 		TokenHash: hashToken("rt_insert_1"),
 		UserID:    user.ID,
+		TenantID:  tenant.ID,
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	}
 
@@ -49,6 +50,7 @@ func TestRevokedTokenStore_InsertIdempotent(t *testing.T) {
 	token := &RevokedRefreshToken{
 		TokenHash: hashToken("rt_idempotent"),
 		UserID:    user.ID,
+		TenantID:  tenant.ID,
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	}
 
@@ -57,6 +59,7 @@ func TestRevokedTokenStore_InsertIdempotent(t *testing.T) {
 	token2 := &RevokedRefreshToken{
 		TokenHash: hashToken("rt_idempotent"),
 		UserID:    user.ID,
+		TenantID:  tenant.ID,
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	}
 
@@ -77,6 +80,7 @@ func TestRevokedTokenStore_Lookup(t *testing.T) {
 	token := &RevokedRefreshToken{
 		TokenHash: hash,
 		UserID:    user.ID,
+		TenantID:  tenant.ID,
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	}
 	require.NoError(t, store.Insert(ctx, token))
@@ -106,6 +110,7 @@ func TestRevokedTokenStore_DeleteExpired(t *testing.T) {
 	expired := &RevokedRefreshToken{
 		TokenHash: hashToken("rt_expired"),
 		UserID:    user.ID,
+		TenantID:  tenant.ID,
 		ExpiresAt: time.Now().UTC().Add(-time.Hour),
 	}
 	require.NoError(t, store.Insert(ctx, expired))
@@ -113,6 +118,7 @@ func TestRevokedTokenStore_DeleteExpired(t *testing.T) {
 	valid := &RevokedRefreshToken{
 		TokenHash: hashToken("rt_valid"),
 		UserID:    user.ID,
+		TenantID:  tenant.ID,
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	}
 	require.NoError(t, store.Insert(ctx, valid))

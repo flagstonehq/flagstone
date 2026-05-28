@@ -27,8 +27,8 @@ func NewRevokedTokenStore(db Querier) *RevokedTokenStore {
 // already there and that's the state we wanted.
 func (s *RevokedTokenStore) Insert(ctx context.Context, token *RevokedRefreshToken) error {
 	const query = `
-		INSERT INTO revoked_refresh_tokens (id, token_hash, user_id, revoked_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO revoked_refresh_tokens (id, token_hash, user_id, tenant_id, revoked_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (token_hash) DO NOTHING
 	`
 
@@ -45,6 +45,7 @@ func (s *RevokedTokenStore) Insert(ctx context.Context, token *RevokedRefreshTok
 		token.ID,
 		token.TokenHash,
 		token.UserID,
+		token.TenantID,
 		token.RevokedAt,
 		token.ExpiresAt,
 	); err != nil {
@@ -58,7 +59,7 @@ func (s *RevokedTokenStore) Insert(ctx context.Context, token *RevokedRefreshTok
 // whose sessions to kill on replay detection.
 func (s *RevokedTokenStore) Lookup(ctx context.Context, tokenHash string) (*RevokedRefreshToken, error) {
 	const query = `
-		SELECT id, token_hash, user_id, revoked_at, expires_at
+		SELECT id, token_hash, user_id, tenant_id, revoked_at, expires_at
 		FROM revoked_refresh_tokens
 		WHERE token_hash = $1
 	`
@@ -68,6 +69,7 @@ func (s *RevokedTokenStore) Lookup(ctx context.Context, tokenHash string) (*Revo
 		&token.ID,
 		&token.TokenHash,
 		&token.UserID,
+		&token.TenantID,
 		&token.RevokedAt,
 		&token.ExpiresAt,
 	); err != nil {
