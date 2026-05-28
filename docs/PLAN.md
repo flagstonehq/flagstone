@@ -1549,10 +1549,14 @@ LIMIT $7 OFFSET $8
 
 ### Checklist Fase 6
 
-- [ ] Crear `internal/api/handlers/audit.go` (GET /api/v1/audit con filtros)
-- [ ] Tests: query sin filtros, con filtros, pagination
-- [ ] Tests: cross-tenant isolation
-- [ ] Tests: verificar que mutations de fases anteriores generaron audit entries
+- [x] Crear `internal/api/audit.go` (GET /api/v1/audit con filtros: actor_id, actor_type, action, resource_type, resource_id, since, until, limit, offset)
+- [x] Tests: query sin filtros (`TestAuditLog_QueryNoFilters`)
+- [x] Tests: con filtros — action, actor_type, resource_id (`TestAuditLog_QueryWithFilters`)
+- [x] Tests: paginación — limit/offset, total count correcto (`TestAuditLog_Pagination`)
+- [x] Tests: cross-tenant isolation — tenant A no ve entries de tenant B (`TestAuditLog_CrossTenant`)
+- [x] Tests: sin auth → 401 (`TestAuditLog_NoAuth`)
+- [x] Ruta: `GET /api/v1/audit` con `AuthJWT + RequireRole(Viewer+)`
+- [x] Tests: mutations generan audit entries visibles via `GET /api/v1/audit` (`TestAuditLog_MutationsWriteEntries` — crea project + flag via HTTP, verifica que ambas acciones aparecen en el log, y que el filtro `resource_type=flag` las reduce correctamente)
 
 ---
 
