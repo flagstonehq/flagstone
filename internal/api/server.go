@@ -291,6 +291,15 @@ func (s *Server) Routes() http.Handler {
 	)
 	mux.Handle("DELETE /api/v1/projects/{slug}/environments/{envSlug}/apikeys/{id}", recoverMW(apikeysRevokeHandler))
 
+	auditHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleAuditLog),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleViewer),
+	)
+	mux.Handle("GET /api/v1/audit", recoverMW(auditHandler))
+
 	evaluateSingleHandler := s.withMiddleware(
 		http.HandlerFunc(s.handleEvaluateFlag),
 		middleware.RequestID(),
