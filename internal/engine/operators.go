@@ -1,10 +1,13 @@
 package engine
 
 import (
+	"regexp"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
-func evaluateLeaf(node ConditionNode, context map[string]any, segments map[string]Segment, visited map[string]struct{}) bool {
+func (e *Engine) evaluateLeaf(node ConditionNode, ctx map[string]any, segments map[string]Segment, visited map[string]struct{}) bool {
 	if node.Op == nil {
 		return false
 	}
@@ -13,40 +16,31 @@ func evaluateLeaf(node ConditionNode, context map[string]any, segments map[strin
 	if node.Attribute != nil {
 		attr = strings.TrimSpace(*node.Attribute)
 	}
-	value, exists := context[attr]
+	val, exists := ctx[attr]
+
 	switch op {
 	case "exists":
 		return exists
+	case "not_exists":
+		return !exists
 	case "eq":
 		if !exists {
 			return false
 		}
-		return equalStrict(value, node.Value)
+		return equalStrict(val, node.Value)
 	case "neq":
 		if !exists {
 			return false
 		}
-		return !equalStrict(value, node.Value)
+		return !equalStrict(val, node.Value)
 	case "gt":
-		if !exists {
-			return false
-		}
-		left, ok1 := asFloat64(value)
-		right, ok2 := asFloat64(node.Value)
-		if !ok1 || !ok2 {
-			return false
-		}
-		return left > right
-	case "contains":
-		if !exists {
-			return false
-		}
-		left, ok1 := value.(string)
-		right, ok2 := node.Value.(string)
-		if !ok1 || !ok2 {
-			return false
-		}
-		return strings.Contains(left, right)
+		return e.compareNumber(val, node.Value, exists, func(l, r float64) bool { return l > r })
+	case "gte":
+		return e.compareNumber(val, node.Value, exists, func(l, r float64) bool { return l >= r })
+	case "lt":
+		return e.compareNumber(val, node.Value, exists, func(l, r float64) bool { return l < r })
+	case "lte":
+		return e.compareNumber(val, node.Value, exists, func(l, r float64) bool { return l <= r })
 	case "in":
 		if !exists {
 			return false
@@ -56,23 +50,98 @@ func evaluateLeaf(node ConditionNode, context map[string]any, segments map[strin
 			return false
 		}
 		for _, item := range items {
-			if equalStrict(value, item) {
+			if equalStrict(val, item) {
 				return true
 			}
 		}
 		return false
+	case "not_in":
+		if !exists {
+			return false
+		}
+		items, ok := node.Value.([]any)
+		if !ok {
+			return false
+		}
+		for _, item := range items {
+			if equalStrict(val, item) {
+				return false
+			}
+		}
+		return true
+	case "contains":
+		if !exists {
+			return false
+		}
+		left, ok1 := val.(string)
+		right, ok2 := node.Value.(string)
+		if !ok1 || !ok2 {
+			return false
+		}
+		return strings.Contains(left, right)
+	case "starts_with":
+		if !exists {
+			return false
+		}
+		left, ok1 := val.(string)
+		right, ok2 := node.Value.(string)
+		if !ok1 || !ok2 {
+			return false
+		}
+		return strings.HasPrefix(left, right)
+	case "ends_with":
+		if !exists {
+			return false
+		}
+		left, ok1 := val.(string)
+		right, ok2 := node.Value.(string)
+		if !ok1 || !ok2 {
+			return false
+		}
+		return strings.HasSuffix(left, right)
+	case "matches":
+		if !exists {
+			return false
+		}
+		left, ok1 := val.(string)
+		pattern, ok2 := node.Value.(string)
+		if !ok1 || !ok2 {
+			return false
+		}
+		matched, err := regexp.MatchString(pattern, left)
+		if err != nil {
+			e.logger.Error("matches operator: invalid regex",
+				zap.String("pattern", pattern),
+				zap.Error(err),
+			)
+			return false
+		}
+		return matched
 	case "segment":
 		segmentKey, ok := node.Value.(string)
 		if !ok {
 			return false
 		}
-		return segmentResolver{
-			segments: segments,
-			context:  context,
-		}.matchesVisited(segmentKey, visited)
+		return e.resolveSegment(segmentKey, ctx, segments, visited)
 	default:
+		e.logger.Warn("unknown operator",
+			zap.String("operator", op),
+			zap.String("attribute", attr),
+		)
 		return false
 	}
+}
+
+func (e *Engine) compareNumber(val, ruleVal any, exists bool, cmp func(float64, float64) bool) bool {
+	if !exists {
+		return false
+	}
+	left, ok1 := asFloat64(val)
+	right, ok2 := asFloat64(ruleVal)
+	if !ok1 || !ok2 {
+		return false
+	}
+	return cmp(left, right)
 }
 
 func equalStrict(left, right any) bool {

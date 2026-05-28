@@ -1834,17 +1834,17 @@ func (e *Engine) resolveSegment(key SegmentKey, ctx map[string]any, segments map
 
 ### Checklist Fase 7
 
-- [ ] Crear `internal/engine/types.go` (EvaluateRequest, EvaluateResult, FlagConfig, Reason, Rule, ConditionNode, RolloutConfig)
-- [ ] Crear `internal/engine/engine.go` (Evaluate, EvaluateAll, panic recovery)
-- [ ] Crear `internal/engine/conditions.go` (evaluateNode, all/any/not/leaf)
-- [ ] Crear `internal/engine/operators.go` (15 operadores, type coercion)
-- [ ] Crear `internal/engine/rollout.go` (FNV-1a, consistent hashing)
-- [ ] Crear `internal/engine/segments.go` (resolveSegment, cycle detection)
-- [ ] Tests: `engine_test.go` — default, disabled, rule match, first match wins, fall through
-- [ ] Tests: `conditions_test.go` — all, any, not, nested, short-circuit, max depth
-- [ ] Tests: `operators_test.go` — cada operador x (match, no match, type mismatch, missing attr)
-- [ ] Tests: `rollout_test.go` — 0%, 100%, deterministico, monotonic, no user_id, custom seed
-- [ ] Tests: `segments_test.go` — normal, not found, circular, transitive
+- [x] Crear `internal/engine/types.go` (EvaluateRequest, EvaluateResult, FlagConfig, Reason, Rule, ConditionNode, RolloutConfig)
+- [x] Crear `internal/engine/engine.go` (Evaluate, EvaluateAll, panic recovery)
+- [x] Crear `internal/engine/conditions.go` (evaluateNode, all/any/not/leaf, depth limit 10)
+- [x] Crear `internal/engine/operators.go` (15 operadores, type coercion, compareNumber factorizado)
+- [x] Crear `internal/engine/rollout.go` (FNV-1a, consistent hashing)
+- [x] Crear `internal/engine/segments.go` (resolveSegment, cycle detection)
+- [x] Tests: `engine_test.go` — default, disabled, rule match, first match wins, fall through, EvaluateAll
+- [x] Tests: `conditions_test.go` — all, any, not, nested, short-circuit
+- [x] Tests: `operators_test.go` — los 15 operadores con match, no match, type mismatch, missing attr
+- [x] Tests: `rollout_test.go` — 0%, 100%, deterministico, monotonic, seed affects bucket, empty userID
+- [x] Tests: `segments_test.go` — normal, not found, circular, transitive (nested)
 
 ---
 

@@ -1,20 +1,11 @@
 package engine
 
-type segmentResolver struct {
-	segments map[string]Segment
-	context  map[string]any
-}
-
-func (r segmentResolver) matches(segmentKey string) bool {
-	return r.matchesVisited(segmentKey, map[string]struct{}{})
-}
-
-func (r segmentResolver) matchesVisited(segmentKey string, visited map[string]struct{}) bool {
+func (e *Engine) resolveSegment(segmentKey string, ctx map[string]any, segments map[string]Segment, visited map[string]struct{}) bool {
 	if _, seen := visited[segmentKey]; seen {
 		return false
 	}
 
-	segment, ok := r.segments[segmentKey]
+	segment, ok := segments[segmentKey]
 	if !ok {
 		return false
 	}
@@ -25,5 +16,5 @@ func (r segmentResolver) matchesVisited(segmentKey string, visited map[string]st
 	}
 	nextVisited[segmentKey] = struct{}{}
 
-	return evaluateNode(segment.Conditions, r.context, r.segments, nextVisited)
+	return e.evaluateNode(segment.Conditions, ctx, segments, nextVisited)
 }
