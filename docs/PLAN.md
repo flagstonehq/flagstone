@@ -65,7 +65,7 @@
 ### Cambios recientes en documentacion (incorporados en este plan)
 
 - **Logging**: `go.uber.org/zap` confirmado como libreria de logging (no `log/slog`). Justificacion: alta performance en el hot path de evaluacion.
-- **Web dashboard**: Next.js 15 + TypeScript + Tailwind + shadcn/ui (Milestone 2). Container separado del API.
+- **Web dashboard**: Next.js 16.2.6 + React 19.2.6 + TypeScript + Tailwind + shadcn/ui (Milestone 2). Container separado del API. Se usa la version mas reciente por las 13 vulnerabilidades parcheadas en mayo 2026, incluyendo RCE pre-autenticacion en React Server Components (CVE-2025-55182, CVSS 9.5) y bypass de autorizacion en Middleware (CVE-2025-29927, CVSS 9.5). Vercel confirmo que no hay mitigacion via WAF — el unico fix es actualizar.
 - **Contenedores separados**: `Dockerfile.api` (Go, ~25MB) + `web/Dockerfile` (Next.js, ~120MB). Un solo `docker-compose.yml` para self-host.
 - **Go version**: `go 1.26.2` (confirmado en `go.mod`). El Dockerfile usa `golang:1.23-alpine` como builder — se actualizara cuando la imagen oficial soporte 1.26.
 
