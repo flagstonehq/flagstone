@@ -1,0 +1,50 @@
+@import "tailwindcss";
+@theme {
+  /* ── Design tokens ─────────────────────────────────────────── */
+  --color-primary:      #364fc7;
+  --color-primary-light: #5c7cfa;
+  --color-primary-dark: #2b3f9e;
+  --color-primary-bg:   #edf2ff;
+  --color-success:      #40c057;
+  --color-success-bg:   #ebfbee;
+  --color-warning:      #fab005;
+  --color-warning-bg:   #fff9db;
+  --color-danger:       #fa5252;
+  --color-danger-bg:    #fff5f5;
+  --color-sidebar-bg:   #212529;
+  --color-sidebar-text: #adb5bd;
+  --color-sidebar-active: #ffffff;
+  --color-border:       #dee2e6;
+  --color-text:         #212529;
+  --color-text-secondary: #868e96;
+  --color-bg:           #f8f9fa;
+  --color-surface:      #ffffff;
+
+  /* ── shadcn/ui semantic tokens (mapped to our design system) ─ */
+  /* These must exist so Tailwind generates classes like           */
+  /* border-input, text-foreground, ring-ring, etc.               */
+  --color-background:          #f8f9fa;
+  --color-foreground:          #212529;
+  --color-card:                #ffffff;
+  --color-card-foreground:     #212529;
+  --color-popover:             #ffffff;
+  --color-popover-foreground:  #212529;
+  --color-primary-foreground:  #ffffff;
+  --color-secondary:           #f1f3f5;
+  --color-secondary-foreground: #495057;
+  --color-muted:               #f1f3f5;
+  --color-muted-foreground:    #868e96;
+  --color-accent:              #edf2ff;
+  --color-accent-foreground:   #364fc7;
+  --color-destructive:         #fa5252;
+  --color-destructive-foreground: #ffffff;
+  --color-input:               #ffffff;
+  --color-ring:                #364fc7;
+
+  /* ── Border radius ───────────────────────────────────────────  */
+  --radius: 0.5rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
