@@ -8,6 +8,7 @@ export default defineConfig({
     environment: "happy-dom",
     globals: true,
     setupFiles: ["__tests__/setup.ts"],
+    exclude: ["__tests__/e2e/**", "node_modules/**"],
     coverage: {
       provider: "v8",
       thresholds: { lines: 80, functions: 80, branches: 80 },
