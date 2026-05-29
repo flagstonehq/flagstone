@@ -2189,3 +2189,1418 @@ Fase 9: CI Pipeline + Integracion Final
 | Logging | DESIGN.md → Logging |
 | Value types | DESIGN.md → Value types for critical IDs |
 | Table-driven tests | DESIGN.md → Table-driven tests for the engine |
+
+---
+
+---
+
+# Flagstone — Plan de Implementacion Milestone 2 (Web Dashboard)
+
+> Plan detallado para el dashboard React/Next.js. Cada fase entrega pantallas
+> funcionales testeadas. Se avanza pantalla por pantalla en orden.
+
+---
+
+## Tabla de Contenidos M2
+
+1. [Stack y Justificacion](#m2-1-stack-y-justificacion)
+2. [Estructura de Archivos](#m2-2-estructura-de-archivos)
+3. [Convenciones de Codigo](#m2-3-convenciones-de-codigo)
+4. [Estrategia de Testing](#m2-4-estrategia-de-testing)
+5. [Buenas Practicas Globales](#m2-5-buenas-practicas-globales)
+6. [Fase W0 — Scaffolding](#m2-6-fase-w0--scaffolding)
+7. [Fase W1 — Login](#m2-7-fase-w1--login)
+8. [Fase W2 — Projects List](#m2-8-fase-w2--projects-list)
+9. [Fase W3 — Flags List](#m2-9-fase-w3--flags-list)
+10. [Fase W4 — Project Settings](#m2-10-fase-w4--project-settings)
+11. [Fase W5 — API Keys](#m2-11-fase-w5--api-keys)
+12. [Fase W6 — Audit Log](#m2-12-fase-w6--audit-log)
+13. [Fase W7 — Account](#m2-13-fase-w7--account)
+14. [Fase W8 — Setup](#m2-14-fase-w8--setup)
+15. [Fase W9 — Rule Editor](#m2-15-fase-w9--rule-editor)
+16. [Fase W10 — Segments](#m2-16-fase-w10--segments)
+17. [Dependencias entre Fases W](#m2-17-dependencias-entre-fases-w)
+18. [Estimacion de Esfuerzo](#m2-18-estimacion-de-esfuerzo)
+
+---
+
+## M2-1. Stack y Justificacion
+
+### Framework principal
+
+| Tecnologia | Version | Razon |
+|---|---|---|
+| Next.js | 16.2.6 | Parchea CVE-2025-55182 (RCE pre-auth CVSS 9.5) y CVE-2025-29927 (middleware auth bypass CVSS 9.5). App Router = Server Components por defecto, file-based routing, Server Actions. |
+| React | 19.2.6 | Parchea CVE-2025-55182 en RSC. `useActionState`, `useFormStatus`, `use()` hook. |
+| TypeScript | 5.x (strict) | `strict: true`. Sin `any`. Errores en compile-time, no en runtime. Autocomplete exacto para los tipos del API backend. |
+
+**Por que Next.js sobre Vite+React o Remix:**
+- App Router permite que cada pagina sea un Server Component que fetchea datos directamente, sin waterfalls cliente ni useEffect para data loading.
+- File-based routing mapea 1:1 con las 10 pantallas del wireframe.
+- Server Actions para mutaciones (crear flag, archivar, crear API key) sin necesidad de un endpoint BFF separado.
+- Middleware de Next.js para proteccion de rutas en el edge sin round-trip al servidor.
+
+### Estilos
+
+| Tecnologia | Version | Razon |
+|---|---|---|
+| Tailwind CSS | v4 | Utility-first. Sin CSS files propios, sin naming wars, sin especificidad conflicts. `@import "tailwindcss"` + deteccion automatica. |
+
+Color primario: `#364fc7` (indigo). Definido una vez en CSS custom properties, usado en todo el sistema via `text-primary`, `bg-primary`, etc.
+
+**Descartado:** CSS Modules (requiere naming de clases, archivos separados), styled-components (runtime CSS-in-JS, peor performance).
+
+### Componentes
+
+| Tecnologia | Razon |
+|---|---|
+| shadcn/ui | Los componentes se **copian** al proyecto via `npx shadcn add`, no son una dependencia NPM. Control total, customizable sin hacks, construido sobre Radix UI (accesibilidad ARIA + keyboard nav incluida gratis). |
+| lucide-react | Icons SVG como componentes React. Tree-shakeable. Consistente con el estilo del wireframe. |
+
+Componentes shadcn que se van a usar: `Button`, `Input`, `Label`, `Badge`, `Table`, `Dialog`, `Switch`, `Select`, `Tabs`, `Textarea`, `Separator`, `Avatar`, `DropdownMenu`, `Alert`, `Skeleton`.
+
+**Descartado:** MUI / Ant Design (dependencias pesadas con estilos propios que pelean con Tailwind), Radix directo (shadcn ya lo abstrae con Tailwind).
+
+### Forms y validacion
+
+| Tecnologia | Razon |
+|---|---|
+| react-hook-form | Formularios sin re-renders innecesarios (uncontrolled inputs). Integra con Server Actions y shadcn/ui via `register` + `Controller`. |
+| zod | Validacion de schemas. Usado en el cliente para validacion instantanea antes de submit. Los mismos schemas se pueden usar en Server Actions para validar en el servidor tambien. |
+
+Formularios que los usan: Login, Setup, Create Project, Create Flag, Create Segment, Create API Key, Edit rule conditions.
+
+### Auth
+
+- JWT del backend Go llega como `access_token` en body del login response.
+- El frontend lo persiste en un **httpOnly cookie** via una Route Handler de Next.js (`app/api/auth/login/route.ts`) — nunca expuesto a `document.cookie` ni `localStorage`.
+- El middleware de Next.js (`middleware.ts`) lee el cookie en cada request. **No verifica la firma** (no tiene el JWT_SECRET) — solo parsea el claim `exp` del payload (base64, sin firma) para saber si el token esta expirado. Si expirado o ausente, redirige a `/login`.
+- El `access_token` tiene TTL de 15 minutos. Para evitar logouts frecuentes, `apiFetch` en `lib/api.ts` intercepta respuestas 401 con un retry automatico: llama `POST /api/auth/refresh` (Route Handler local que rota el refresh cookie httpOnly) y reintenta el request original una sola vez. Si el refresh tambien falla (refresh expirado, revocado, reuse detectado), redirige a `/login`.
+- En rutas publicas (`/login`, `/setup`) el middleware redirige a `/projects` si ya hay sesion valida.
+- Sin NextAuth, Lucia, ni libros de auth de terceros — el backend ya hace toda la auth.
+
+**Flujo de tokens en el frontend:**
+```
+request → middleware lee exp claim del cookie
+  ├─ cookie ausente / exp pasado → redirect /login
+  └─ cookie presente y vigente → pasa
+
+fetch en Server/Client Component
+  └─ apiFetch()
+       ├─ 200 → ok
+       ├─ 401 → llama /api/auth/refresh (Route Handler)
+       │         ├─ refresh ok → nuevo access_token cookie → retry request original
+       │         └─ refresh falla → redirect /login
+       └─ otros 4xx/5xx → ApiError tipado
+```
+
+### Estado
+
+- **Sin Redux, Zustand, Jotai, ni Context global.**
+- Server Components fetchean directamente con funciones de `lib/api.ts`.
+- Client Components usan `useState` / `useReducer` local.
+- `router.refresh()` re-ejecuta Server Components despues de mutaciones (sin full page reload).
+- El unico "estado global" es la sesion, que vive en el httpOnly cookie y se lee en Server Components via `cookies()`.
+
+### Comunicacion con el backend Go
+
+- Backend Go: `:8080`. Next.js: `:3000`.
+- En dev, `next.config.ts` define `rewrites()` para que `/api/v1/*` proxye a `http://localhost:8080/api/v1/*`. El browser nunca habla directamente al backend (evita CORS config en el backend).
+- En produccion, Docker Compose pone ambos en la misma red interna. El proxy Next.js sigue funcionando.
+- `lib/api.ts` es el unico lugar que sabe la URL base del backend. Todos los fetches pasan por ahi.
+
+### Contenedor
+
+```dockerfile
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:22-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+EXPOSE 3000
+CMD ["node", "server.js"]
+```
+
+`output: "standalone"` en `next.config.ts` produce bundle minimo (~120MB imagen final).
+
+---
+
+## M2-2. Estructura de Archivos
+
+```
+web/
+├── package.json                    # name: "flagstone-web", port: 3000
+├── next.config.ts                  # rewrites /api/v1/* -> backend, output standalone
+├── tsconfig.json                   # strict: true, paths alias @/*
+├── tailwind.config.ts              # color primario, fuente
+├── components.json                 # shadcn config (style, baseColor, etc.)
+├── .env.local                      # NEXT_PUBLIC_APP_URL, BACKEND_URL (server-side only)
+├── Dockerfile                      # multi-stage, node:22-alpine
+│
+├── app/                            # App Router
+│   ├── layout.tsx                  # Root layout: fuente, html lang, metadata global
+│   ├── globals.css                 # @import "tailwindcss", CSS custom properties
+│   ├── page.tsx                    # Redirect a /login o /projects segun sesion
+│   │
+│   ├── login/
+│   │   └── page.tsx                # Server Component — si hay sesion, redirect /projects
+│   │
+│   ├── setup/
+│   │   └── page.tsx                # Server Component — si ya hay tenant, redirect /login
+│   │
+│   ├── projects/
+│   │   ├── page.tsx                # Server Component — lista proyectos
+│   │   └── [slug]/
+│   │       ├── layout.tsx          # Layout con sidebar de proyecto (Server Component)
+│   │       ├── flags/
+│   │       │   ├── page.tsx        # Server Component — lista flags
+│   │       │   └── [key]/
+│   │       │       └── page.tsx    # Server Component — rule editor
+│   │       ├── segments/
+│   │       │   └── page.tsx        # Server Component — lista + editor segmentos
+│   │       ├── api-keys/
+│   │       │   └── page.tsx        # Server Component — lista API keys
+│   │       ├── audit/
+│   │       │   └── page.tsx        # Server Component — audit log con filtros
+│   │       └── settings/
+│   │           └── page.tsx        # Server Component — settings del proyecto
+│   │
+│   ├── account/
+│   │   └── page.tsx                # Server Component — cuenta del usuario
+│   │
+│   └── api/
+│       └── auth/
+│           ├── login/
+│           │   └── route.ts        # Route Handler: proxya login, setea httpOnly cookie
+│           ├── logout/
+│           │   └── route.ts        # Route Handler: limpia cookie, llama backend logout
+│           └── refresh/
+│               └── route.ts        # Route Handler: refresca token, rota cookie
+│
+├── components/
+│   ├── ui/                         # shadcn copies (no tocar salvo customizacion)
+│   │   ├── button.tsx
+│   │   ├── input.tsx
+│   │   ├── badge.tsx
+│   │   ├── table.tsx
+│   │   ├── dialog.tsx
+│   │   ├── switch.tsx
+│   │   ├── select.tsx
+│   │   ├── tabs.tsx
+│   │   ├── label.tsx
+│   │   ├── separator.tsx
+│   │   ├── avatar.tsx
+│   │   ├── dropdown-menu.tsx
+│   │   ├── alert.tsx
+│   │   └── skeleton.tsx
+│   │
+│   ├── layout/
+│   │   ├── sidebar.tsx             # "use client" — nav activa, highlight segun ruta
+│   │   ├── topbar.tsx              # Titulo de pagina + acciones (Server Component)
+│   │   └── project-switcher.tsx    # "use client" — dropdown de proyectos
+│   │
+│   ├── login/
+│   │   └── login-form.tsx          # "use client" — form con react-hook-form + zod
+│   │
+│   ├── projects/
+│   │   ├── project-card.tsx        # Server Component — tarjeta de proyecto
+│   │   └── create-project-dialog.tsx  # "use client" — dialog + form
+│   │
+│   ├── flags/
+│   │   ├── flags-table.tsx         # Server Component — tabla de flags
+│   │   ├── flag-row.tsx            # Server Component — fila de la tabla
+│   │   ├── create-flag-dialog.tsx  # "use client" — dialog + form
+│   │   ├── archive-flag-button.tsx # "use client" — boton con confirm
+│   │   └── env-toggle.tsx          # "use client" — Switch enabled/disabled por env
+│   │
+│   ├── rules/
+│   │   ├── rule-editor.tsx         # "use client" — editor de reglas completo
+│   │   ├── rule-card.tsx           # "use client" — una regla con condiciones
+│   │   ├── condition-row.tsx       # "use client" — una condicion attr/op/val
+│   │   └── rollout-input.tsx       # "use client" — input numerico validado 0-100
+│   │
+│   ├── segments/
+│   │   ├── segments-table.tsx
+│   │   ├── segment-row.tsx
+│   │   └── create-segment-dialog.tsx
+│   │
+│   ├── api-keys/
+│   │   ├── api-keys-table.tsx
+│   │   ├── create-key-dialog.tsx   # "use client" — form + modal de raw key
+│   │   └── raw-key-modal.tsx       # "use client" — muestra la key UNA vez
+│   │
+│   ├── audit/
+│   │   ├── audit-table.tsx
+│   │   ├── audit-filters.tsx       # "use client" — filtros (actor, accion, fecha)
+│   │   └── audit-row.tsx
+│   │
+│   ├── settings/
+│   │   ├── project-settings-form.tsx   # "use client"
+│   │   ├── environments-list.tsx
+│   │   └── danger-zone.tsx         # "use client" — delete project con confirm
+│   │
+│   └── account/
+│       ├── change-password-form.tsx    # "use client"
+│       └── sessions-list.tsx
+│
+├── lib/
+│   ├── api.ts                      # fetch wrapper: base URL, auth header, error handling
+│   ├── auth.ts                     # leer/escribir/borrar cookie de sesion (server-side)
+│   ├── schemas.ts                  # schemas zod para todos los forms
+│   └── utils.ts                    # cn() (clsx + twMerge), formatDate, formatRelative
+│
+├── middleware.ts                   # proteccion de rutas, redirect /login si no hay sesion
+│
+└── __tests__/                      # tests (ver seccion M2-4)
+    ├── unit/
+    │   ├── lib/
+    │   │   ├── schemas.test.ts
+    │   │   └── utils.test.ts
+    │   └── components/
+    │       ├── login-form.test.tsx
+    │       ├── rule-editor.test.tsx
+    │       ├── condition-row.test.tsx
+    │       └── rollout-input.test.tsx
+    ├── integration/
+    │   ├── login.test.tsx
+    │   ├── flags-list.test.tsx
+    │   ├── rule-editor.test.tsx
+    │   └── api-keys.test.tsx
+    └── e2e/
+        ├── login.spec.ts
+        ├── flags.spec.ts
+        └── rule-editor.spec.ts
+```
+
+---
+
+## M2-3. Convenciones de Codigo
+
+### Server Components vs Client Components
+
+**Regla:** todo es Server Component por defecto. Se agrega `"use client"` solo cuando el componente necesita:
+- `useState`, `useReducer`, `useEffect`, `useRef`
+- Event handlers (`onClick`, `onChange`, `onSubmit`)
+- Browser APIs (`window`, `document`, `localStorage`)
+- Hooks de react-hook-form
+
+**Anti-patron:** marcar toda una pagina como `"use client"` porque un boton necesita estado. En su lugar, extraer el boton a un componente client separado y dejarlo como hoja del arbol.
+
+```tsx
+// MAL — toda la pagina como client
+"use client"
+export default function FlagsPage() { ... }
+
+// BIEN — solo el componente interactivo es client
+// flags/page.tsx (Server Component)
+import { FlagsTable } from "@/components/flags/flags-table"
+import { CreateFlagDialog } from "@/components/flags/create-flag-dialog" // "use client"
+export default async function FlagsPage() {
+  const flags = await getFlags(projectSlug)
+  return (
+    <>
+      <FlagsTable flags={flags} />
+      <CreateFlagDialog />
+    </>
+  )
+}
+```
+
+### Naming
+
+| Cosa | Convencion | Ejemplo |
+|---|---|---|
+| Archivos de componentes | kebab-case | `flag-row.tsx` |
+| Componentes (funcion) | PascalCase | `FlagRow` |
+| Hooks | camelCase con prefijo `use` | `useDebounce` |
+| Funciones de lib | camelCase | `getFlags`, `formatDate` |
+| Variables | camelCase | `flagKey`, `projectSlug` |
+| Constantes | UPPER_SNAKE | `MAX_RULES_PER_FLAG` |
+| Tipos/interfaces | PascalCase | `Flag`, `RuleCondition` |
+| Archivos de tests | mismo nombre + `.test.tsx` | `flag-row.test.tsx` |
+
+### Tipos
+
+- Todos los tipos del dominio se definen en `lib/types.ts` y matchean exactamente con los modelos del backend Go.
+- Sin `any`. Si el tipo no se conoce, usar `unknown` y narrowing explicito.
+- Los responses del API se validan con zod en `lib/api.ts` antes de ser usados en el componente.
+
+```ts
+// lib/types.ts
+export type Flag = {
+  id: string
+  projectId: string
+  key: string
+  name: string
+  description: string | null
+  type: "boolean" | "string" | "number" | "json"
+  archivedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type FlagEnvironment = {
+  flagId: string
+  environmentId: string
+  enabled: boolean
+  rules: Rule[]
+  version: number
+}
+
+export type Rule = {
+  id: string
+  conditions: Condition[]
+  returnValue: boolean | string | number
+  rollout: number  // 0-100
+}
+
+export type Condition = {
+  attribute: string
+  // Must match exactly the operator strings the Go engine accepts.
+  // The engine treats unknown operators as false (silent) — typos here
+  // would produce flags that never match without any error.
+  operator:
+    | "eq" | "neq"
+    | "gt" | "gte" | "lt" | "lte"
+    | "in" | "not_in"
+    | "contains" | "starts_with" | "ends_with" | "matches"
+    | "exists" | "not_exists"
+    | "segment"
+  value: string | number | boolean | string[]
+}
+```
+
+### Manejo de errores
+
+- Cada fetch en `lib/api.ts` puede lanzar un `ApiError` tipado con `code` y `message`.
+- Los Server Components usan el archivo `error.tsx` de Next.js para capturar errores no manejados.
+- Los Client Components muestran inline errors via react-hook-form o estado local.
+- Los errores de red/timeout se muestran via `Alert` de shadcn/ui.
+- **Nunca** se muestra un stack trace al usuario.
+
+```ts
+// lib/api.ts
+export class ApiError extends Error {
+  constructor(
+    public readonly code: string,
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message)
+    this.name = "ApiError"
+  }
+}
+
+export async function apiFetch<T>(
+  path: string,
+  options?: RequestInit,
+): Promise<T> {
+  const res = await fetch(`${BACKEND_URL}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new ApiError(
+      body?.error?.code ?? "UNKNOWN",
+      res.status,
+      body?.error?.message ?? res.statusText,
+    )
+  }
+  return res.json() as Promise<T>
+}
+```
+
+### Accesibilidad
+
+- Todo componente interactivo tiene `aria-label` o texto visible accesible.
+- El orden de focus es logico (no se usa `tabindex` positivo).
+- Los modales (Dialog de shadcn/Radix) manejan focus trap y `aria-modal` automaticamente.
+- Los colores cumplen WCAG AA (contrast ratio >= 4.5:1 para texto normal).
+- Los botones de accion destructiva (archivar flag, revocar key) tienen doble confirmacion.
+
+### Performance
+
+- Imagenes con `next/image` (si las hubiera).
+- Fuentes con `next/font` (sin layout shift).
+- `loading.tsx` en cada segmento de ruta para mostrar Skeleton mientras carga.
+- `Suspense` + `loading.tsx` en lugar de spinners manuales.
+- Las tablas grandes usan paginacion del servidor (el backend ya lo soporta via `limit`/`offset`).
+
+---
+
+## M2-4. Estrategia de Testing
+
+### Stack de testing
+
+| Herramienta | Rol |
+|---|---|
+| Vitest | Test runner. Rapido, nativo ESM, API compatible con Jest. |
+| @testing-library/react | Render de componentes en tests. Testea comportamiento, no implementacion. |
+| @testing-library/user-event | Simula interacciones reales de usuario (tipo, click, tab, etc.). |
+| @testing-library/jest-dom | Matchers adicionales: `toBeInTheDocument`, `toHaveValue`, etc. |
+| msw (Mock Service Worker) | Intercepta fetch calls en tests para simular el backend sin levantarlo. |
+| Playwright | Tests E2E contra el servidor Next.js real. |
+| happy-dom | DOM virtual para Vitest (mas rapido que jsdom). |
+
+### Piramide de tests
+
+```
+         /\
+        /  \       E2E (Playwright)
+       /    \      — flujos criticos completos
+      /------\     — login, crear flag, toggle, API key flow
+     /        \
+    /          \   Integracion (Vitest + RTL + MSW)
+   /            \  — componentes completos con datos mockeados
+  /--------------\ — formularios, validaciones, respuestas de error del API
+ /                \
+/                  \ Unit (Vitest + RTL)
+\------------------/ — funciones puras de lib/
+                     — componentes simples sin logica de red
+                     — schemas zod
+                     — utils
+```
+
+### Tests unitarios
+
+**Que se testea:**
+- `lib/schemas.ts`: cada schema zod con casos validos e invalidos.
+- `lib/utils.ts`: `formatDate`, `formatRelative`, `cn()`, etc.
+- Componentes simples: `RolloutInput` (valida 0-100, rechaza letras), `ConditionRow` (renderiza attr/op/val correctamente).
+- `LoginForm`: renderiza campos, muestra errores de validacion client-side, deshabilita boton durante submit.
+- `RuleEditor`: agregar condicion, eliminar condicion, cambiar operador, toggle AND/OR.
+
+**Convencion:**
+```tsx
+// __tests__/unit/components/rollout-input.test.tsx
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { RolloutInput } from "@/components/rules/rollout-input"
+
+describe("RolloutInput", () => {
+  it("acepta valores entre 0 y 100", async () => {
+    const onChange = vi.fn()
+    render(<RolloutInput value={50} onChange={onChange} />)
+    await userEvent.clear(screen.getByRole("spinbutton"))
+    await userEvent.type(screen.getByRole("spinbutton"), "75")
+    expect(onChange).toHaveBeenLastCalledWith(75)
+  })
+
+  it("rechaza valores > 100", async () => {
+    render(<RolloutInput value={50} onChange={vi.fn()} />)
+    await userEvent.clear(screen.getByRole("spinbutton"))
+    await userEvent.type(screen.getByRole("spinbutton"), "150")
+    expect(screen.getByRole("spinbutton")).toHaveAttribute("aria-invalid", "true")
+  })
+})
+```
+
+### Tests de integracion
+
+**Que se testea:**
+- Flujo completo de login: email/password validos → cookie seteado, redirect.
+- Login con credenciales incorrectas → mensaje de error visible.
+- Login con cuenta bloqueada → mensaje de retry.
+- Flags list: renderiza la tabla con datos del MSW handler, muestra skeleton durante carga.
+- CreateFlagDialog: submit con datos validos → flag aparece en la lista, dialog se cierra.
+- ArchiveFlagButton: confirm dialog aparece, submit llama al API, flag desaparece de la lista activa.
+- CreateApiKeyDialog: raw key se muestra exactamente una vez en el modal, no hay forma de volver a verla.
+- RuleEditor: agregar regla, agregar condicion, cambiar valores, guardar → llamada al API con el payload correcto.
+
+**MSW handlers:**
+```ts
+// __tests__/mocks/handlers.ts
+import { http, HttpResponse } from "msw"
+
+export const handlers = [
+  http.post("/api/v1/auth/login", () =>
+    HttpResponse.json({ access_token: "test-jwt", tenant: { slug: "acme" } }),
+  ),
+  http.get("/api/v1/projects", () =>
+    HttpResponse.json({ projects: [{ id: "1", slug: "my-app", name: "My App" }] }),
+  ),
+  http.get("/api/v1/projects/:slug/flags", () =>
+    HttpResponse.json({ flags: mockFlags }),
+  ),
+  // ... un handler por endpoint que la UI usa
+]
+```
+
+### Tests E2E (Playwright)
+
+**Que se testea (solo flujos criticos):**
+
+| Test | Flujo |
+|---|---|
+| login-success | Ingresar email + password → redirect a /projects → titulo "Projects" visible |
+| login-invalid | Email/password incorrectos → mensaje de error visible en pantalla |
+| login-locked | 5 intentos fallidos → mensaje de cuenta bloqueada con countdown |
+| create-flag | /projects/my-app/flags → click "New Flag" → form → submit → flag aparece en tabla |
+| toggle-flag | Tabla de flags → click Switch de un flag → toast de confirmacion → estado persistido |
+| archive-flag | Tabla de flags → click archivo → confirm dialog → flag desaparece → aparece en archived |
+| create-api-key | /api-keys → click "New key" → form → submit → raw key visible en modal → cerrar → ya no visible |
+| rule-editor | Abrir flag → tab Rules → agregar condicion → cambiar rollout a 50 → Save → recargar → regla persiste |
+| setup-flow | GET /setup (primer run) → form → submit → redirect /login |
+
+**Configuracion Playwright:**
+```ts
+// playwright.config.ts
+export default defineConfig({
+  testDir: "./__tests__/e2e",
+  use: {
+    baseURL: "http://localhost:3000",
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
+  },
+  webServer: {
+    command: "npm run dev",
+    url: "http://localhost:3000",
+    reuseExistingServer: !process.env.CI,
+  },
+})
+```
+
+### Cobertura
+
+- **Meta:** >= 80% de cobertura en `lib/` y en componentes con logica no trivial.
+- **No se persigue cobertura en:** componentes puramente visuales sin logica, layouts, paginas que son solo composicion de otros componentes.
+- `vitest --coverage` genera el reporte. En CI (cuando se active Fase 9), falla el build si cae de 80%.
+
+### Comandos
+
+```bash
+npm run test          # vitest (watch mode en dev)
+npm run test:run      # vitest --run (single pass, para CI)
+npm run test:coverage # vitest --coverage
+npm run test:e2e      # playwright test
+npm run test:e2e:ui   # playwright test --ui (modo visual)
+```
+
+---
+
+## M2-5. Buenas Practicas Globales
+
+### Seguridad
+
+- El JWT **nunca** toca `localStorage` ni `document.cookie` desde JS del cliente. Solo viaja en httpOnly cookie.
+- El cookie tiene `SameSite=Lax` + `Secure` en produccion + `HttpOnly`. Inmune a XSS.
+- Las Route Handlers que proxyan al backend validan que el cookie exista antes de hacer el request.
+- El raw value de una API key se muestra en el `RawKeyModal` exactamente una vez. El componente no persiste el valor en estado despues de cerrado: la key vive en el `useState` de `CreateKeyDialog` y se limpia a `null` en el `onOpenChange` del Dialog (cuando se cierra). React destruye el estado al desmontar, pero limpiar explicitamente garantiza que si el usuario abre el dialog por segunda vez (sin hacer un nuevo POST) no vea la key anterior.
+- Sin `dangerouslySetInnerHTML` en ningun componente.
+- El contenido de inputs del usuario nunca se concatena en queries o URLs directamente — siempre via parametros tipados.
+
+### Acciones destructivas
+
+Toda accion irreversible (archivar flag, revocar API key, eliminar proyecto, eliminar segmento) requiere:
+1. Un boton primario que abre un confirm dialog.
+2. El dialog explica exactamente que va a pasar.
+3. Un boton secundario de confirmacion (rojo) dentro del dialog.
+4. El boton de cancelar tiene el foco por defecto (anti-fat-finger).
+
+### Loading states
+
+- Cada Server Component tiene su `loading.tsx` sibling con Skeletons que replican el layout de la pantalla cargada.
+- Los botones de submit muestran un spinner y se deshabilitan mientras el request esta en vuelo (`useFormStatus` o `isPending` de `useActionState`).
+- Las tablas vacías tienen un estado empty explícito con mensaje y CTA (no tabla con 0 filas).
+
+### Error states
+
+- Si el fetch del Server Component falla, el `error.tsx` sibling muestra un mensaje amigable con boton "Try again" que llama `reset()`.
+- Los errores de validacion del API (400) se muestran en el campo correspondiente del form.
+- Los errores de autorizacion (401) redirigen a `/login` via middleware.
+- Los errores 403 muestran una pagina "You don't have permission" con link a la pantalla anterior.
+- Los errores 500 muestran un mensaje generico (sin stack trace).
+
+### Linting y formato
+
+```json
+// package.json scripts
+{
+  "lint": "next lint",
+  "lint:fix": "next lint --fix",
+  "format": "prettier --write .",
+  "format:check": "prettier --check .",
+  "typecheck": "tsc --noEmit"
+}
+```
+
+Configuracion de linting:
+- `eslint-config-next` como base.
+- Regla `no-restricted-imports` para prohibir `import React from "react"` (no necesario en React 19).
+- Regla personalizada: prohibir `"use client"` en archivos de `app/*/page.tsx` directamente — las paginas deben ser Server Components. Si se necesita client, extraer componente.
+- `prettier` con `printWidth: 100`, `semi: false`, `singleQuote: false`.
+
+### Git workflow
+
+- Cada fase W tiene su propio branch: `feat/w0-scaffold`, `feat/w1-login`, etc.
+- Commits atomicos por componente o feature. Mensaje: `feat(w1): login form con validacion zod`.
+- PR por fase. No se mergea sin que todos los tests pasen.
+- Los archivos generados por shadcn (`components/ui/`) se commitean (son parte del codigo del proyecto).
+
+---
+
+## M2-6. Fase W0 — Scaffolding
+
+**Objetivo:** proyecto Next.js funcional, Tailwind configurado, shadcn/ui inicializado, tests corriendo, proxy al backend funcionando.
+
+### Comandos de inicializacion
+
+```bash
+cd web/
+npx create-next-app@16.2.6 . \
+  --typescript \
+  --tailwind \
+  --eslint \
+  --app \
+  --src-dir=no \
+  --import-alias="@/*" \
+  --use-npm
+
+# Instalar dependencias de produccion
+npm install react-hook-form zod lucide-react clsx tailwind-merge
+
+# Instalar dependencias de desarrollo
+npm install -D vitest @vitejs/plugin-react @testing-library/react \
+  @testing-library/user-event @testing-library/jest-dom \
+  msw happy-dom @playwright/test
+
+# Inicializar shadcn/ui
+npx shadcn@latest init
+# Responder: style=default, baseColor=slate, cssVariables=yes
+
+# Agregar componentes shadcn que se van a necesitar
+npx shadcn@latest add button input label badge table dialog \
+  switch select tabs textarea separator avatar dropdown-menu alert skeleton
+```
+
+### Archivos a crear/modificar en W0
+
+**`next.config.ts`:**
+```ts
+import type { NextConfig } from "next"
+
+const nextConfig: NextConfig = {
+  output: "standalone",
+  async rewrites() {
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: `${process.env.BACKEND_URL ?? "http://localhost:8080"}/api/v1/:path*`,
+      },
+    ]
+  },
+}
+
+export default nextConfig
+```
+
+**`middleware.ts`:**
+```ts
+import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server"
+
+const PUBLIC_PATHS = ["/login", "/setup", "/api/auth"]
+
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
+  const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p))
+  const token = request.cookies.get("access_token")?.value
+
+  if (!isPublic && !token) {
+    return NextResponse.redirect(new URL("/login", request.url))
+  }
+  if (isPublic && token && !pathname.startsWith("/api/auth")) {
+    return NextResponse.redirect(new URL("/projects", request.url))
+  }
+  return NextResponse.next()
+}
+
+export const config = {
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+}
+```
+
+**`vitest.config.ts`:**
+```ts
+import { defineConfig } from "vitest/config"
+import react from "@vitejs/plugin-react"
+import path from "path"
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: "happy-dom",
+    globals: true,
+    setupFiles: ["__tests__/setup.ts"],
+    coverage: {
+      provider: "v8",
+      threshold: { lines: 80, functions: 80, branches: 80 },
+      exclude: ["components/ui/**", "**/*.config.*", "__tests__/**"],
+    },
+  },
+  resolve: {
+    alias: { "@": path.resolve(__dirname, ".") },
+  },
+})
+```
+
+**`__tests__/setup.ts`:**
+```ts
+import "@testing-library/jest-dom"
+import { server } from "./mocks/server"
+
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }))
+afterEach(() => server.resetHandlers())
+afterAll(() => server.close())
+```
+
+**`lib/utils.ts`:**
+```ts
+import { clsx, type ClassValue } from "clsx"
+import { twMerge } from "tailwind-merge"
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+
+export function formatDate(iso: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric", month: "short", day: "numeric",
+  }).format(new Date(iso))
+}
+
+export function formatRelative(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const minutes = Math.floor(diff / 60_000)
+  if (minutes < 1) return "just now"
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
+}
+```
+
+### Verificaciones de W0
+
+- `npm run dev` arranca en `:3000` sin errores.
+- `npm run build` completa sin errores de TypeScript.
+- `npm run lint` pasa sin warnings.
+- `npm run typecheck` pasa.
+- `npm run test:run` pasa (aunque no haya tests aun, setup no crashea).
+- `curl http://localhost:3000/login` devuelve HTML (la pagina de login, aunque este vacia).
+- `curl http://localhost:3000/projects` redirige a `/login` (middleware activo).
+- `curl http://localhost:3000/api/v1/healthz` (con backend corriendo) devuelve `{"status":"ok"}` — proxy funciona.
+
+### Checklist W0
+
+- [ ] `npm create next-app@16.2.6` con flags correctos
+- [ ] `next.config.ts` con `output: "standalone"` y `rewrites()` al backend
+- [ ] `middleware.ts` con proteccion de rutas y redirect logico
+- [ ] `tailwind.config.ts` con color primario `#364fc7` en CSS custom properties
+- [ ] `components.json` de shadcn configurado
+- [ ] Todos los componentes shadcn instalados (button, input, label, badge, table, dialog, switch, select, tabs, textarea, separator, avatar, dropdown-menu, alert, skeleton)
+- [ ] `lib/utils.ts`: `cn()`, `formatDate()`, `formatRelative()`
+- [ ] `lib/types.ts`: tipos del dominio (Flag, Rule, Condition, Project, Environment, APIKey, AuditEntry, Segment)
+- [ ] `lib/api.ts`: `apiFetch<T>()`, `ApiError`, funciones por recurso
+- [ ] `lib/schemas.ts`: schemas zod para todos los forms (login, create-project, create-flag, create-segment, create-api-key)
+- [ ] `vitest.config.ts` con happy-dom, paths alias, coverage thresholds
+- [ ] `playwright.config.ts` con webServer configurado
+- [ ] `__tests__/setup.ts` con MSW setup
+- [ ] `__tests__/mocks/handlers.ts` con handlers para todos los endpoints usados
+- [ ] `__tests__/mocks/server.ts` con MSW node server
+- [ ] Tests unitarios de `lib/utils.ts` (formatDate, formatRelative, cn)
+- [ ] Tests unitarios de `lib/schemas.ts` (casos validos e invalidos por schema)
+- [ ] `npm run test:run` pasa
+- [ ] `npm run build` pasa
+- [ ] `npm run typecheck` pasa
+- [ ] `Dockerfile` en `web/` funciona: `docker build -t flagstone-web web/`
+- [ ] Actualizar `docker-compose.yml` raiz para incluir servicio `web`
+
+---
+
+## M2-7. Fase W1 — Login
+
+**Objetivo:** pantalla de login funcional con validacion, manejo de errores del API y redirect post-login. Cubre la pantalla 1 del wireframe.
+
+### Componentes
+
+**`app/login/page.tsx`** (Server Component):
+- Lee cookie de sesion. Si existe, redirect a `/projects`.
+- Renderiza `LoginForm`.
+
+**`components/login/login-form.tsx`** (`"use client"`):
+- Form con `react-hook-form` + schema zod (`loginSchema`).
+- Campos: `email` (required, email format), `password` (required, min 8 chars).
+- Submit llama a `POST /api/auth/login` (Route Handler local, no directamente al backend).
+- Maneja: credenciales incorrectas (401) → mensaje de error inline, cuenta bloqueada (423) → mensaje con tiempo de espera, error de red → mensaje generico.
+- Boton "Sign in" con spinner durante submit (`useFormStatus` o `isPending`).
+- Link "Forgot password?" (MVP: placeholder, no implementado).
+- Loading state: boton deshabilitado, campos deshabilitados.
+
+**`app/api/auth/login/route.ts`** (Route Handler):
+- Recibe `{ email, password, tenant_slug? }`.
+- Hace POST al backend Go `/api/v1/auth/login`.
+- Si 200: setea httpOnly cookie `access_token`, retorna `{ ok: true, redirectTo: "/projects" }`.
+- Si 409 MULTIPLE_TENANTS: retorna los tenants disponibles para que el form pida elegir.
+- Si 4xx: retorna el error para que el form lo muestre.
+
+**`loginSchema`** (en `lib/schemas.ts`):
+```ts
+export const loginSchema = z.object({
+  email: z.string().email("Must be a valid email"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  tenant_slug: z.string().optional(),
+})
+```
+
+### Tests W1
+
+**Unitarios:**
+- `LoginForm` renderiza los dos campos y el boton.
+- Submit con campos vacios muestra errores de validacion (sin llamar al API).
+- Submit con email invalido muestra error de formato.
+- Submit con password < 8 chars muestra error.
+
+**Integracion:**
+- Login exitoso → cookie seteado, redirect a `/projects`.
+- Login con credenciales incorrectas → mensaje "Invalid email or password" visible.
+- Login con cuenta bloqueada → mensaje con retry time visible.
+- Login con multiple tenants → step de selector de tenant aparece.
+- Boton deshabilitado durante submit (simular request lento con MSW `delay`).
+
+**E2E (Playwright):**
+- `login-success.spec.ts`: flujo completo con backend real (o MSW en E2E mode).
+- `login-invalid.spec.ts`: mensaje de error visible.
+
+### Checklist W1
+
+- [ ] `app/login/page.tsx` (Server Component, redirect si sesion existe)
+- [ ] `app/login/loading.tsx` (Skeleton del form)
+- [ ] `app/login/error.tsx` (error boundary)
+- [ ] `components/login/login-form.tsx` con react-hook-form + zod
+- [ ] `app/api/auth/login/route.ts` (setea httpOnly cookie)
+- [ ] `app/api/auth/logout/route.ts` (limpia cookie)
+- [ ] `app/api/auth/refresh/route.ts` (rota cookie)
+- [ ] `loginSchema` en `lib/schemas.ts`
+- [ ] Tests unitarios: LoginForm (renderiza, validacion client-side)
+- [ ] Tests integracion: login exitoso, credenciales incorrectas, cuenta bloqueada, multiple tenants
+- [ ] Tests E2E: login-success, login-invalid
+- [ ] `npm run test:run` pasa
+- [ ] `npm run typecheck` pasa
+
+---
+
+## M2-8. Fase W2 — Projects List
+
+**Objetivo:** pantalla de lista de proyectos con sidebar, crear proyecto. Cubre la pantalla 2 del wireframe.
+
+### Componentes clave
+
+- `app/projects/page.tsx`: Server Component, fetchea `GET /api/v1/projects`, renderiza `ProjectCard` x N + `CreateProjectDialog`.
+- `components/projects/project-card.tsx`: Server Component. Muestra nombre, slug, N environments, N flags, fecha creacion.
+- `components/projects/create-project-dialog.tsx`: Client Component. Form con `name` (required) y `slug` (auto-generado desde name, editable). Submit llama `POST /api/v1/projects`, luego `router.refresh()`.
+- `components/layout/sidebar.tsx`: Client Component (necesita saber la ruta activa). Muestra logo, nav items, user email en el fondo. En pantallas de proyecto: muestra el proyecto activo con nav de Flags, Segments, API Keys, Audit, Settings.
+
+**`createProjectSchema`:**
+```ts
+export const createProjectSchema = z.object({
+  name: z.string().min(1).max(100),
+  slug: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/, "Only lowercase letters, numbers, hyphens"),
+})
+```
+
+### Tests W2
+
+**Unitarios:**
+- `ProjectCard` renderiza nombre, slug, N environments, N flags.
+- `createProjectSchema` acepta slugs validos, rechaza con mayusculas, rechaza con espacios.
+
+**Integracion:**
+- Lista de proyectos se renderiza con datos del MSW handler.
+- Estado vacio: mensaje "No projects yet" con CTA visible.
+- `CreateProjectDialog` abre al hacer click en "New project".
+- Submit de form valido → proyecto aparece en la lista, dialog se cierra.
+- Submit de form con slug duplicado → error inline del API visible.
+
+**E2E:**
+- Proyecto creado persiste tras reload de pagina.
+
+### Checklist W2
+
+- [ ] `app/projects/page.tsx`
+- [ ] `app/projects/loading.tsx` (Skeletons de cards)
+- [ ] `app/projects/error.tsx`
+- [ ] `components/projects/project-card.tsx`
+- [ ] `components/projects/create-project-dialog.tsx`
+- [ ] `components/layout/sidebar.tsx` (nav global)
+- [ ] `components/layout/topbar.tsx`
+- [ ] `createProjectSchema` en `lib/schemas.ts`
+- [ ] Funciones en `lib/api.ts`: `getProjects()`, `createProject()`
+- [ ] Tests unitarios: ProjectCard, createProjectSchema
+- [ ] Tests integracion: lista, empty state, crear proyecto, slug duplicado
+- [ ] `npm run test:run` pasa
+
+---
+
+## M2-9. Fase W3 — Flags List
+
+**Objetivo:** lista de flags con search, toggle enabled/disabled por entorno, archivar. Cubre la pantalla 3 del wireframe.
+
+### Componentes clave
+
+- `app/projects/[slug]/flags/page.tsx`: Server Component. Fetchea flags + environments del proyecto. Renderiza tabla.
+- `components/flags/flags-table.tsx`: Server Component. Tabla con columnas: key, name, type, enabled (por env), last updated, actions.
+- `components/flags/env-toggle.tsx`: Client Component. Switch que llama `PATCH /api/v1/projects/:slug/flags/:key/environments/:env` para toggle enabled. `router.refresh()` tras exito.
+- `components/flags/create-flag-dialog.tsx`: Client Component. Fields: key (slug), name, type (boolean/string/number/json), description (opcional).
+- `components/flags/archive-flag-button.tsx`: Client Component. Boton con confirm dialog. Llama `DELETE /api/v1/projects/:slug/flags/:key` (soft delete = archivedAt).
+
+**`createFlagSchema`:**
+```ts
+export const createFlagSchema = z.object({
+  key: z.string().min(1).max(100).regex(/^[a-z0-9-_]+$/, "Lowercase, numbers, hyphens, underscores"),
+  name: z.string().min(1).max(200),
+  type: z.enum(["boolean", "string", "number", "json"]),
+  description: z.string().max(500).optional(),
+})
+```
+
+### Tests W3
+
+**Unitarios:**
+- `FlagRow` renderiza key, name, type badge, enabled switch, fecha.
+- `createFlagSchema` valida tipos correctamente, rechaza keys con espacios.
+- `EnvToggle` llama `onChange` con el valor correcto.
+
+**Integracion:**
+- Tabla renderiza 5 flags del mock.
+- `EnvToggle` deshabilita durante el request, re-habilita tras exito.
+- `EnvToggle` muestra error inline si el API falla.
+- `ArchiveFlagButton` abre confirm dialog, flag desaparece tras confirmar.
+- `CreateFlagDialog` valida duplicados (la API retorna 409).
+
+**E2E:**
+- `flags.spec.ts`: toggle-flag persiste tras reload. create-flag aparece en lista.
+
+### Checklist W3
+
+- [ ] `app/projects/[slug]/flags/page.tsx`
+- [ ] `app/projects/[slug]/flags/loading.tsx`
+- [ ] `app/projects/[slug]/layout.tsx` (sidebar con nav de proyecto)
+- [ ] `components/flags/flags-table.tsx`
+- [ ] `components/flags/flag-row.tsx`
+- [ ] `components/flags/env-toggle.tsx`
+- [ ] `components/flags/create-flag-dialog.tsx`
+- [ ] `components/flags/archive-flag-button.tsx`
+- [ ] `createFlagSchema` en `lib/schemas.ts`
+- [ ] Funciones en `lib/api.ts`: `getFlags()`, `createFlag()`, `archiveFlag()`, `toggleFlagEnv()`
+- [ ] Tests unitarios: FlagRow, createFlagSchema, EnvToggle
+- [ ] Tests integracion: tabla, toggle, archive, create, 409
+- [ ] Tests E2E: toggle-flag, create-flag
+- [ ] `npm run test:run` pasa
+
+---
+
+## M2-10. Fase W4 — Project Settings
+
+**Objetivo:** settings del proyecto: rename, gestionar environments, zona de peligro (delete). Cubre la pantalla de Project Settings del wireframe.
+
+### Componentes clave
+
+- `app/projects/[slug]/settings/page.tsx`: Server Component.
+- `components/settings/project-settings-form.tsx`: Client. Edita name del proyecto. `PATCH /api/v1/projects/:slug`.
+- `components/settings/environments-list.tsx`: Client. Lista envs, permite crear nuevo env (`POST /api/v1/projects/:slug/environments`) y eliminar (con confirm).
+- `components/settings/danger-zone.tsx`: Client. Delete project con confirm + tipear el slug del proyecto para confirmar. Llama `DELETE /api/v1/projects/:slug`. Redirect a `/projects` tras exito.
+
+### Tests W4
+
+**Unitarios:**
+- `DangerZone` no habilita el boton confirm hasta que se tipee el slug correcto.
+
+**Integracion:**
+- `ProjectSettingsForm` muestra el nombre actual, permite editarlo, submit guarda.
+- `EnvironmentsList` renderiza los envs, crear nuevo env aparece en la lista.
+- `DangerZone` delete con slug incorrecto → boton sigue deshabilitado.
+- `DangerZone` delete con slug correcto → redirect a /projects.
+
+### Checklist W4
+
+- [ ] `app/projects/[slug]/settings/page.tsx`
+- [ ] `components/settings/project-settings-form.tsx`
+- [ ] `components/settings/environments-list.tsx`
+- [ ] `components/settings/danger-zone.tsx`
+- [ ] Funciones en `lib/api.ts`: `updateProject()`, `deleteProject()`, `getEnvironments()`, `createEnvironment()`, `deleteEnvironment()`
+- [ ] Tests unitarios: DangerZone (slug validation)
+- [ ] Tests integracion: rename, create env, delete project
+- [ ] `npm run test:run` pasa
+
+---
+
+## M2-11. Fase W5 — API Keys
+
+**Objetivo:** gestionar API keys por entorno. Raw value una sola vez. Cubre la pantalla de API Keys del wireframe.
+
+### Componentes clave
+
+- `app/projects/[slug]/api-keys/page.tsx`: Server Component. Fetchea keys por proyecto (sin raw value).
+- `components/api-keys/api-keys-table.tsx`: Server Component. Columnas: nombre, prefix (`fs_live_xxxx…`), env, creado, ultimo uso, expira, acciones.
+- `components/api-keys/create-key-dialog.tsx`: Client. Form: nombre, environment (select), expiry (optional). Submit llama `POST /api/v1/projects/:slug/environments/:env/api-keys`. La respuesta incluye el raw key **una sola vez**. Si la response tiene `raw_key`, abre `RawKeyModal` automaticamente.
+- `components/api-keys/raw-key-modal.tsx`: Client. Muestra la key completa con boton de copiar. Al cerrar, el componente elimina la key de su estado local. No hay forma de volver a verla desde la UI. Advertencia explícita: "This key will not be shown again."
+- `components/api-keys/revoke-key-button.tsx`: Client. Confirm dialog + `DELETE /api/v1/projects/:slug/environments/:env/api-keys/:id`.
+
+**`createApiKeySchema`:**
+```ts
+export const createApiKeySchema = z.object({
+  name: z.string().min(1).max(100),
+  environment_id: z.string().uuid(),
+  expires_at: z.string().datetime().optional(),
+})
+```
+
+### Tests W5
+
+**Unitarios:**
+- `RawKeyModal` muestra la key en un input readonly.
+- `RawKeyModal` boton de copiar llama `navigator.clipboard.writeText`.
+- `RawKeyModal` al cerrar, la key no esta en el DOM.
+- `createApiKeySchema` valida UUID del environment, acepta expires_at opcional.
+
+**Integracion:**
+- `CreateKeyDialog` submit → API call → `RawKeyModal` se abre con la key.
+- Cerrar `RawKeyModal` → la key ya no esta en el DOM (no hay forma de recuperarla).
+- Abrir `CreateKeyDialog` por segunda vez (sin crear key) → el modal no muestra la key de la creacion anterior (estado limpiado en `onOpenChange`).
+- `RevokeKeyButton` confirm → key desaparece de la tabla.
+- Tabla muestra "No API keys" cuando no hay keys.
+
+**E2E:**
+- `create-api-key.spec.ts`: crear key → key visible en modal → cerrar → key no visible en tabla (solo prefix).
+
+### Checklist W5
+
+- [ ] `app/projects/[slug]/api-keys/page.tsx`
+- [ ] `components/api-keys/api-keys-table.tsx`
+- [ ] `components/api-keys/create-key-dialog.tsx`
+- [ ] `components/api-keys/raw-key-modal.tsx`
+- [ ] `components/api-keys/revoke-key-button.tsx`
+- [ ] `createApiKeySchema` en `lib/schemas.ts`
+- [ ] Funciones en `lib/api.ts`: `getApiKeys()`, `createApiKey()`, `revokeApiKey()`
+- [ ] Tests unitarios: RawKeyModal (muestra, copia, limpia al cerrar), createApiKeySchema
+- [ ] Tests integracion: crear key, raw key modal, revocar key, estado vacio
+- [ ] Tests E2E: create-api-key flujo completo
+- [ ] `npm run test:run` pasa
+
+---
+
+## M2-12. Fase W6 — Audit Log
+
+**Objetivo:** tabla de audit log con filtros. Cubre la pantalla de Audit del wireframe.
+
+### Componentes clave
+
+- `app/projects/[slug]/audit/page.tsx`: Server Component. Lee filtros de `searchParams` (actor, action, desde, hasta). Fetchea `GET /api/v1/audit?...`. Renderiza tabla + filtros.
+- `components/audit/audit-filters.tsx`: Client. Controles de filtro con URL state (actualiza `searchParams` al cambiar). Inputs: actor (email), action (select con enum), date range.
+- `components/audit/audit-table.tsx`: Server Component. Paginacion del servidor.
+- `components/audit/audit-row.tsx`: Server Component. Icono por tipo de accion, actor, recurso, timestamp relativo + absoluto en hover (tooltip).
+
+### Tests W6
+
+**Unitarios:**
+- `formatRelative` retorna "just now", "5m ago", "2h ago", "3d ago" correctamente.
+- `AuditRow` renderiza el actor y la accion.
+
+**Integracion:**
+- Tabla renderiza entradas del mock.
+- Filtro por action filtra las entradas visibles.
+- Paginacion: "Load more" carga la siguiente pagina.
+
+### Checklist W6
+
+- [ ] `app/projects/[slug]/audit/page.tsx`
+- [ ] `components/audit/audit-filters.tsx`
+- [ ] `components/audit/audit-table.tsx`
+- [ ] `components/audit/audit-row.tsx`
+- [ ] Funciones en `lib/api.ts`: `getAuditLog(filters)`
+- [ ] Tests unitarios: formatRelative, AuditRow
+- [ ] Tests integracion: tabla, filtros, paginacion
+- [ ] `npm run test:run` pasa
+
+---
+
+## M2-13. Fase W7 — Account
+
+**Objetivo:** configuracion de cuenta del usuario: cambiar password, ver sesiones activas. Cubre la pantalla Account del wireframe.
+
+### Componentes clave
+
+- `app/account/page.tsx`: Server Component. Fetchea datos del usuario actual + sesiones activas.
+- `components/account/change-password-form.tsx`: Client. Fields: current password, new password, confirm new password. Validacion local: new === confirm, new >= 8 chars. Submit `PATCH /api/v1/auth/me/password`.
+- `components/account/sessions-list.tsx`: Client. Lista de sesiones activas con device/IP/fecha. Boton "Revoke" por sesion. Boton "Revoke all other sessions".
+
+**`changePasswordSchema`:**
+```ts
+export const changePasswordSchema = z.object({
+  current_password: z.string().min(1),
+  new_password: z.string().min(8),
+  confirm_password: z.string(),
+}).refine((d) => d.new_password === d.confirm_password, {
+  message: "Passwords do not match",
+  path: ["confirm_password"],
+})
+```
+
+### Tests W7
+
+**Unitarios:**
+- `changePasswordSchema` rechaza cuando new !== confirm.
+- `changePasswordSchema` rechaza new < 8 chars.
+- `changePasswordSchema` acepta caso valido.
+
+**Integracion:**
+- `ChangePasswordForm` valida antes de submit (sin llamar al API).
+- Submit exitoso → mensaje de confirmacion visible.
+- `SessionsList` muestra sesiones. Revocar una sesion la elimina de la lista.
+
+### Checklist W7
+
+- [ ] `app/account/page.tsx`
+- [ ] `components/account/change-password-form.tsx`
+- [ ] `components/account/sessions-list.tsx`
+- [ ] `changePasswordSchema` en `lib/schemas.ts`
+- [ ] Funciones en `lib/api.ts`: `getMe()`, `changePassword()`, `getSessions()`, `revokeSession()`
+- [ ] Tests unitarios: changePasswordSchema
+- [ ] Tests integracion: cambiar password, revocar sesion
+- [ ] `npm run test:run` pasa
+
+---
+
+## M2-14. Fase W8 — Setup
+
+**Objetivo:** pantalla de primer run (setup inicial). Solo accesible si no existe ningun tenant. Cubre la pantalla Setup del wireframe.
+
+### Componentes clave
+
+- `app/setup/page.tsx`: Server Component. Llama `GET /api/v1/setup/status`. Si ya hay tenant, redirect a `/login`. Si no, renderiza `SetupForm`.
+- `components/setup/setup-form.tsx`: Client. Fields: tenant name, tenant slug, admin email, admin password, confirm password. Submit `POST /api/v1/setup`. Redirect a `/login` con mensaje "Setup complete. Please sign in."
+
+**`setupSchema`:**
+```ts
+export const setupSchema = z.object({
+  tenant_name: z.string().min(1).max(100),
+  tenant_slug: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/),
+  admin_email: z.string().email(),
+  admin_password: z.string().min(8),
+  confirm_password: z.string(),
+}).refine((d) => d.admin_password === d.confirm_password, {
+  message: "Passwords do not match",
+  path: ["confirm_password"],
+})
+```
+
+### Tests W8
+
+**Unitarios:**
+- `setupSchema` valida todos los campos.
+- `setupSchema` rechaza cuando passwords no coinciden.
+
+**Integracion:**
+- `SetupForm` muestra todos los campos, valida antes de submit.
+- Submit exitoso → redirect a `/login`.
+- Si el backend retorna 409 (ya existe tenant) → mensaje de error.
+
+**E2E:**
+- `setup-flow.spec.ts`: flujo completo desde `/setup` hasta `/login`.
+
+### Checklist W8
+
+- [ ] `app/setup/page.tsx`
+- [ ] `components/setup/setup-form.tsx`
+- [ ] `setupSchema` en `lib/schemas.ts`
+- [ ] Funciones en `lib/api.ts`: `getSetupStatus()`, `runSetup()`
+- [ ] Tests unitarios: setupSchema
+- [ ] Tests integracion: form valido, passwords no coinciden, tenant ya existe
+- [ ] Tests E2E: setup-flow
+- [ ] `npm run test:run` pasa
+
+---
+
+## M2-15. Fase W9 — Rule Editor
+
+**Objetivo:** editor de reglas de un flag por entorno. El mas complejo del dashboard. Cubre la pantalla de Flag Rule Editor del wireframe.
+
+### Componentes clave
+
+- `app/projects/[slug]/flags/[key]/page.tsx`: Server Component. Fetchea flag + environments + flag_environments (rules por env). Renderiza `RuleEditor` con los datos del entorno seleccionado.
+- `components/rules/rule-editor.tsx`: Client Component completo. Estado: lista de reglas, entorno seleccionado, enabled toggle. Botones: "Add rule", "Save". Submit hace `PUT /api/v1/projects/:slug/flags/:key/environments/:env/rules` con optimistic update.
+- `components/rules/rule-card.tsx`: Client. Una regla con badge "Rule N", boton eliminar (✕), lista de condiciones, seccion de return value + rollout.
+- `components/rules/condition-row.tsx`: Client. Tres selects/inputs en linea: attribute (free text), operator (select: eq, neq, gt, gte, lt, lte, contains, in, nin), value (free text, o lista para `in`/`nin`). Boton AND toggle: si hay multiples condiciones, muestra "AND" entre ellas (clickable para toggle a OR — aunque el MVP solo soporta AND).
+- `components/rules/rollout-input.tsx`: Client. Input numerico 0-100 con sufijo "%". Validacion: integer, 0-100. Muestra error si fuera de rango.
+
+**Logica de estado del RuleEditor:**
+```ts
+type RuleState = {
+  rules: Rule[]
+  enabled: boolean
+  selectedEnv: string
+  isDirty: boolean  // hay cambios sin guardar
+}
+```
+
+Al cambiar de entorno (selector), si `isDirty`, muestra confirm dialog "You have unsaved changes. Discard them?".
+
+Al hacer "Save":
+1. Validar que cada regla tenga al menos una condicion.
+2. Validar que todos los rollouts sumen <= 100 (warning si > 100, error si una regla sola > 100).
+3. POST/PUT al API.
+4. Si exito: `isDirty = false`, toast de confirmacion.
+5. Si 409 (version conflict — OCC del backend): mostrar "This flag was modified by someone else. Reload to see latest version."
+
+**`ruleSchema`:**
+```ts
+const conditionSchema = z.object({
+  attribute: z.string().min(1),
+  operator: z.enum(["eq", "neq", "gt", "gte", "lt", "lte", "contains", "in", "nin"]),
+  value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+})
+
+const ruleSchema = z.object({
+  id: z.string(),
+  conditions: z.array(conditionSchema).min(1, "At least one condition required"),
+  returnValue: z.union([z.boolean(), z.string(), z.number()]),
+  rollout: z.number().int().min(0).max(100),
+})
+
+export const rulesPayloadSchema = z.array(ruleSchema)
+```
+
+### Tests W9
+
+**Unitarios:**
+- `RolloutInput` acepta 0, 50, 100. Rechaza 101, -1, letras.
+- `ConditionRow` renderiza los tres campos, llama onChange con el valor correcto.
+- `conditionSchema` valida todos los operadores.
+- `ruleSchema` rechaza reglas sin condiciones.
+- `rulesPayloadSchema` valida el payload completo.
+
+**Integracion:**
+- `RuleEditor` renderiza la regla existente del mock.
+- Agregar condicion: click "Add condition" → nueva fila de condicion aparece.
+- Eliminar condicion: click ✕ → fila desaparece.
+- Agregar regla: click "Add rule" → nuevo `RuleCard` aparece.
+- Cambiar rollout a valor invalido → error visible, boton Save deshabilitado.
+- Save exitoso → `isDirty = false`, toast visible.
+- Save con version conflict (409 mock) → mensaje de conflict visible.
+- Cambiar env con cambios sin guardar → confirm dialog aparece.
+
+**E2E:**
+- `rule-editor.spec.ts`: flujo completo — abrir flag → cambiar rollout → save → reload → valor persiste.
+
+### Checklist W9
+
+- [ ] `app/projects/[slug]/flags/[key]/page.tsx`
+- [ ] `components/rules/rule-editor.tsx`
+- [ ] `components/rules/rule-card.tsx`
+- [ ] `components/rules/condition-row.tsx`
+- [ ] `components/rules/rollout-input.tsx`
+- [ ] `ruleSchema`, `conditionSchema`, `rulesPayloadSchema` en `lib/schemas.ts`
+- [ ] Funciones en `lib/api.ts`: `getFlagDetail()`, `getFlagEnvironment()`, `saveRules()`
+- [ ] Tests unitarios: RolloutInput, ConditionRow, ruleSchema, rulesPayloadSchema
+- [ ] Tests integracion: render, agregar/eliminar condicion, agregar/eliminar regla, save exitoso, 409 conflict, cambiar env con dirty state
+- [ ] Tests E2E: rule-editor flujo completo
+- [ ] `npm run test:run` pasa
+
+---
+
+## M2-16. Fase W10 — Segments
+
+**Objetivo:** lista de segmentos y editor de reglas de segmento. Similar al rule editor pero para segmentos. Cubre la pantalla de Segments del wireframe.
+
+### Componentes clave
+
+- `app/projects/[slug]/segments/page.tsx`: Server Component. Lista de segmentos + editor inline del seleccionado.
+- `components/segments/segments-table.tsx`: Server Component.
+- `components/segments/create-segment-dialog.tsx`: Client. Fields: key, name, description.
+- `components/segments/segment-rule-editor.tsx`: Client. Similar al `RuleEditor` pero para segmentos (las reglas de un segmento definen que usuarios pertenecen a el). Sin rollout (los segmentos son todo o nada).
+
+**`createSegmentSchema`:**
+```ts
+export const createSegmentSchema = z.object({
+  key: z.string().min(1).max(100).regex(/^[a-z0-9-_]+$/),
+  name: z.string().min(1).max(200),
+  description: z.string().max(500).optional(),
+})
+```
+
+### Tests W10
+
+**Unitarios:**
+- `createSegmentSchema` valida key format.
+- `SegmentRuleEditor` renderiza reglas existentes.
+
+**Integracion:**
+- Lista renderiza segmentos del mock.
+- Crear segmento → aparece en la lista.
+- Editar reglas de segmento → save → reglas persisten.
+
+### Checklist W10
+
+- [ ] `app/projects/[slug]/segments/page.tsx`
+- [ ] `components/segments/segments-table.tsx`
+- [ ] `components/segments/create-segment-dialog.tsx`
+- [ ] `components/segments/segment-rule-editor.tsx`
+- [ ] `createSegmentSchema` en `lib/schemas.ts`
+- [ ] Funciones en `lib/api.ts`: `getSegments()`, `createSegment()`, `archiveSegment()`, `saveSegmentRules()`
+- [ ] Tests unitarios: createSegmentSchema, SegmentRuleEditor
+- [ ] Tests integracion: lista, crear, editar reglas
+- [ ] `npm run test:run` pasa
+
+---
+
+## M2-17. Dependencias entre Fases W
+
+```
+W0 (Scaffold)
+  └── W1 (Login)
+        └── W2 (Projects)
+              └── W3 (Flags List)
+                    ├── W4 (Project Settings)
+                    ├── W5 (API Keys)
+                    ├── W6 (Audit Log)
+                    └── W9 (Rule Editor)
+              └── W7 (Account)   [depende de W2 solo por el sidebar]
+W0 ──────────── W8 (Setup)       [independiente, no necesita sesion]
+W3 + W9 ─────── W10 (Segments)  [el editor de reglas es el mismo patron]
+```
+
+W8 (Setup) es la unica pantalla que NO requiere sesion y puede desarrollarse en paralelo con W1.
+W9 (Rule Editor) requiere W3 (Flags List) porque se accede desde ahi.
+W10 (Segments) es mas facil despues de W9 porque reusan los componentes de rules.
+
+---
+
+## M2-18. Estimacion de Esfuerzo
+
+| Fase | Pantallas | Componentes nuevos | Tests aprox. | Complejidad |
+|---|---|---|---|---|
+| W0 — Scaffold | 0 | ~10 (utils, layout base) | ~15 | Baja |
+| W1 — Login | 1 | 3 | ~12 | Baja |
+| W2 — Projects | 1 | 4 | ~10 | Baja |
+| W3 — Flags List | 1 | 5 | ~15 | Media |
+| W4 — Project Settings | 1 | 3 | ~8 | Baja |
+| W5 — API Keys | 1 | 4 | ~12 | Media |
+| W6 — Audit Log | 1 | 3 | ~8 | Baja |
+| W7 — Account | 1 | 2 | ~8 | Baja |
+| W8 — Setup | 1 | 2 | ~8 | Baja |
+| W9 — Rule Editor | 1 | 5 | ~20 | Alta |
+| W10 — Segments | 1 | 4 | ~12 | Media |
+| **Total** | **10** | **~45** | **~128** | — |
