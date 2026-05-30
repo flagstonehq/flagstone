@@ -34,6 +34,29 @@ export const handlers = [
       ],
     }),
   ),
+  // Create project
+  http.post(`${API_BASE}/api/v1/projects`, async ({ request }) => {
+    const body = (await request.json()) as { name: string; slug: string };
+    if (body.slug === "duplicate-slug") {
+      return HttpResponse.json(
+        { error: { code: "SLUG_CONFLICT", message: "Slug already exists" } },
+        { status: 409 },
+      );
+    }
+    return HttpResponse.json(
+      {
+        project: {
+          id: "p-new",
+          tenant_id: "t1",
+          slug: body.slug,
+          name: body.name,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      },
+      { status: 201 },
+    );
+  }),
   // Envs
   http.get(`${API_BASE}/api/v1/projects/:slug/environments`, () =>
     HttpResponse.json({

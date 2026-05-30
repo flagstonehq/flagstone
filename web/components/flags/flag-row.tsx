@@ -2,7 +2,6 @@ import type { Flag, Environment } from "@/lib/types";
 import { EnvToggle } from "./env-toggle";
 import { ArchiveFlagButton } from "./archive-flag-button";
 import { formatRelative } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 
 const TYPE_COLORS: Record<string, string> = {
   boolean: "bg-green-100 text-green-800",
@@ -29,19 +28,15 @@ export function FlagRow({ flag, environments, projectSlug }: FlagRowProps) {
           {flag.type}
         </span>
       </td>
-      {environments.map((env) => {
-        const envState = flag.flagEnvironments?.find((fe) => fe.environmentId === env.id);
-        return (
-          <td key={env.id} className="px-4 py-3 text-center">
-            <EnvToggle
-              projectSlug={projectSlug}
-              flagKey={flag.key}
-              envSlug={env.slug}
-              defaultEnabled={envState?.enabled ?? false}
-            />
-          </td>
-        );
-      })}
+      {environments.map((env) => (
+        <td key={env.id} className="px-4 py-3 text-center">
+          <EnvToggle
+            projectSlug={projectSlug}
+            flagKey={flag.key}
+            envSlug={env.slug}
+          />
+        </td>
+      ))}
       <td className="text-text-secondary px-4 py-3 text-xs whitespace-nowrap">
         {formatRelative(flag.updatedAt)}
       </td>

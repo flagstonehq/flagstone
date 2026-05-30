@@ -78,6 +78,13 @@ export function getSegments(projectSlug: string) {
   );
 }
 
+export function createProject(data: { name: string; slug: string }) {
+  return apiFetch<{ project: import("./types").Project }>("/api/v1/projects", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
 export function createFlag(
   projectSlug: string,
   data: { key: string; name: string; type: string; description?: string },
