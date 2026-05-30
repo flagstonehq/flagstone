@@ -15,11 +15,9 @@ export async function POST(request: Request) {
   const data = await backendRes.json();
 
   if (!backendRes.ok) {
+    // Includes 409 MULTIPLE_TENANTS — pass the full response body so the
+    // LoginForm can render the tenant picker from data.error.available_tenants.
     return NextResponse.json(data, { status: backendRes.status });
-  }
-
-  if (backendRes.status === 409) {
-    return NextResponse.json(data, { status: 409 });
   }
 
   const cookieStore = await cookies();
