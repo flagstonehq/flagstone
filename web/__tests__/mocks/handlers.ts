@@ -1,8 +1,9 @@
 import { http, HttpResponse } from "msw";
-const BACKEND = "http://localhost:8080";
+
+export const API_BASE = "http://localhost";
 export const handlers = [
   // Auth
-  http.post(`${BACKEND}/api/v1/auth/login`, () =>
+  http.post(`${API_BASE}/api/v1/auth/login`, () =>
     HttpResponse.json({
       access_token: "test-jwt-token",
       token_type: "Bearer",
@@ -11,7 +12,7 @@ export const handlers = [
     }),
   ),
   // Projects
-  http.get(`${BACKEND}/api/v1/projects`, () =>
+  http.get(`${API_BASE}/api/v1/projects`, () =>
     HttpResponse.json({
       projects: [
         {
@@ -33,8 +34,31 @@ export const handlers = [
       ],
     }),
   ),
+  // Create project
+  http.post(`${API_BASE}/api/v1/projects`, async ({ request }) => {
+    const body = (await request.json()) as { name: string; slug: string };
+    if (body.slug === "duplicate-slug") {
+      return HttpResponse.json(
+        { error: { code: "SLUG_CONFLICT", message: "Slug already exists" } },
+        { status: 409 },
+      );
+    }
+    return HttpResponse.json(
+      {
+        project: {
+          id: "p-new",
+          tenant_id: "t1",
+          slug: body.slug,
+          name: body.name,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      },
+      { status: 201 },
+    );
+  }),
   // Envs
-  http.get(`${BACKEND}/api/v1/projects/:slug/environments`, () =>
+  http.get(`${API_BASE}/api/v1/projects/:slug/environments`, () =>
     HttpResponse.json({
       environments: [
         {
@@ -49,7 +73,7 @@ export const handlers = [
     }),
   ),
   // Flags
-  http.get(`${BACKEND}/api/v1/projects/:slug/flags`, () =>
+  http.get(`${API_BASE}/api/v1/projects/:slug/flags`, () =>
     HttpResponse.json({
       flags: [
         {
@@ -71,4 +95,40 @@ export const handlers = [
       ],
     }),
   ),
+  // Toggle flag env
+  http.patch(
+    `${API_BASE}/api/v1/projects/:slug/flags/:key/environments/:env`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  // Archive flag
+  http.delete(
+    `${API_BASE}/api/v1/projects/:slug/flags/:key`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  // Create flag
+  http.post(`${API_BASE}/api/v1/projects/:slug/flags`, async ({ request }) => {
+    const body = (await request.json()) as { key: string; name: string; type: string };
+    if (body.key === "duplicate-key") {
+      return HttpResponse.json(
+        { error: { code: "KEY_CONFLICT", message: "Flag key already exists" } },
+        { status: 409 },
+      );
+    }
+    return HttpResponse.json(
+      {
+        flag: {
+          id: "f-new",
+          project_id: "p1",
+          key: body.key,
+          name: body.name,
+          type: body.type,
+          description: null,
+          archived_at: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      },
+      { status: 201 },
+    );
+  }),
 ];
