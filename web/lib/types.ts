@@ -29,6 +29,7 @@ export type Flag = {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  flagEnvironments?: FlagEnvironment[];
 };
 export type FlagEnvironment = {
   flagId: string;
