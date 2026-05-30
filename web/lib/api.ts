@@ -1,3 +1,5 @@
+import { Environment, Project } from "./types";
+
 export class ApiError extends Error {
   constructor(
     public readonly code: string,
@@ -72,6 +74,33 @@ export function getAuditLog(projectSlug: string, params?: Record<string, string>
     `/api/v1/projects/${projectSlug}/audit${qs}`,
   );
 }
+
+export function updateProject(projectSlug: string, data: { name: string }) {
+  return apiFetch<{ project: Project }>(`/api/v1/projects/${projectSlug}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteProject(projectSlug: string) {
+  return apiFetch<void>(`/api/v1/projects/${projectSlug}`, {
+    method: "DELETE",
+  });
+}
+
+export function createEnvironment(projectSlug: string, data: { name: string; slug: string }) {
+  return apiFetch<{ environment: Environment }>(`/api/v1/projects/${projectSlug}/environments`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteEnvironment(projectSlug: string, envId: string) {
+  return apiFetch<void>(`/api/v1/projects/${projectSlug}/environments/${envId}`, {
+    method: "DELETE",
+  });
+}
+
 export function getSegments(projectSlug: string) {
   return apiFetch<{ segments: import("./types").Segment[] }>(
     `/api/v1/projects/${projectSlug}/segments`,

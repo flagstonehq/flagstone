@@ -62,3 +62,16 @@ export const createSegmentSchema = z.object({
   name: z.string().min(1, "Name is required").max(200),
   description: z.string().max(500).optional(),
 });
+
+export const updateProjectSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100),
+});
+
+export const createEnvironmentSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100),
+  slug: z
+    .string()
+    .min(1)
+    .max(50)
+    .regex(/^[a-z0-9-]+$/, "Only lowercase letters, numbers, and hyphens"),
+});

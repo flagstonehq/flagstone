@@ -57,6 +57,42 @@ export const handlers = [
       { status: 201 },
     );
   }),
+  // Single project
+  http.get(`${API_BASE}/api/v1/projects/:slug`, ({ params }) => {
+    const { slug } = params;
+    if (slug === "my-app") {
+      return HttpResponse.json({
+        project: {
+          id: "p1",
+          tenant_id: "t1",
+          slug: "my-app",
+          name: "My App",
+          created_at: new Date(Date.now() - 172800000).toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      });
+    }
+    return HttpResponse.json(
+      { error: { code: "NOT_FOUND", message: "Project not found" } },
+      { status: 404 },
+    );
+  }),
+  // Update project
+  http.patch(`${API_BASE}/api/v1/projects/:slug`, async ({ request, params }) => {
+    const body = (await request.json()) as { name: string };
+    return HttpResponse.json({
+      project: {
+        id: "p1",
+        tenant_id: "t1",
+        slug: params.slug,
+        name: body.name,
+        created_at: new Date(Date.now() - 172800000).toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    });
+  }),
+  // Delete project
+  http.delete(`${API_BASE}/api/v1/projects/:slug`, () => new HttpResponse(null, { status: 204 })),
   // Envs
   http.get(`${API_BASE}/api/v1/projects/:slug/environments`, () =>
     HttpResponse.json({
@@ -131,4 +167,30 @@ export const handlers = [
       { status: 201 },
     );
   }),
+  // Create environment
+  http.post(`${API_BASE}/api/v1/projects/:slug/environments`, async ({ request }) => {
+    const body = (await request.json()) as { name: string; slug: string };
+    if (body.slug === "duplicate") {
+      return HttpResponse.json(
+        { error: { code: "SLUG_CONFLICT", message: "Slug already exists" } },
+        { status: 409 },
+      );
+    }
+    return HttpResponse.json(
+      {
+        environment: {
+          id: "e-new",
+          project_id: "p1",
+          slug: body.slug,
+          name: body.name,
+        },
+      },
+      { status: 201 },
+    );
+  }),
+  // Delete environment
+  http.delete(
+    `${API_BASE}/api/v1/projects/:slug/environments/:envId`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
 ];

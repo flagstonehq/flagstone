@@ -7,6 +7,8 @@ import {
   setupSchema,
   createApiKeySchema,
   createSegmentSchema,
+  updateProjectSchema,
+  createEnvironmentSchema,
 } from "@/lib/schemas";
 describe("loginSchema", () => {
   it("accepts valid input", () => {
@@ -150,5 +152,32 @@ describe("createSegmentSchema", () => {
       name: "Beta Users",
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("updateProjectSchema", () => {
+  it("accepts valid name", () => {
+    const r = updateProjectSchema.safeParse({ name: "My App" });
+    expect(r.success).toBe(true);
+  });
+  it("rejects empty name", () => {
+    const r = updateProjectSchema.safeParse({ name: "" });
+    expect(r.success).toBe(false);
+  });
+});
+describe("createEnvironmentSchema", () => {
+  it("accepts valid slug", () => {
+    const r = createEnvironmentSchema.safeParse({
+      name: "Staging",
+      slug: "staging",
+    });
+    expect(r.success).toBe(true);
+  });
+  it("rejects uppercase slug", () => {
+    const r = createEnvironmentSchema.safeParse({
+      name: "Staging",
+      slug: "Staging",
+    });
+    expect(r.success).toBe(false);
   });
 });
