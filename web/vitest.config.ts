@@ -6,6 +6,9 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: "happy-dom",
+    environmentOptions: {
+      happyDOM: { url: "http://localhost" },
+    },
     globals: true,
     setupFiles: ["__tests__/setup.ts"],
     exclude: ["__tests__/e2e/**", "node_modules/**"],
