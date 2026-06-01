@@ -1,5 +1,3 @@
-import { APIKey } from "./types";
-
 export class ApiError extends Error {
   constructor(
     public readonly code: string,

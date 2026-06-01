@@ -2,7 +2,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Suspense } from "react";
-import { getAuditLog, type AuditLogParams } from "@/lib/api";
+import { serverFetch } from "@/lib/api";
+import type { AuditLogParams, AuditLogPage } from "@/lib/api";
 import { AuditTable } from "@/components/audit/audit-table";
 import { AuditFilters } from "@/components/audit/audit-filters";
 import { Topbar } from "@/components/layout/topbar";
@@ -44,7 +45,17 @@ export default async function AuditPage({ params, searchParams }: AuditPageProps
     offset: pickString(sp.offset) ? Number(pickString(sp.offset)) : 0,
   } satisfies AuditLogParams;
 
-  const { entries, total, limit, offset } = await getAuditLog(reqParams);
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(reqParams)) {
+    if (value !== undefined && value !== "") {
+      search.set(key, String(value));
+    }
+  }
+  const qs = search.toString();
+  const { entries, total, limit, offset } = await serverFetch<AuditLogPage>(
+    `/api/v1/audit${qs ? "?" + qs : ""}`,
+    token,
+  );
 
   const currentOffset = offset ?? 0;
   const nextOffset = currentOffset + limit;

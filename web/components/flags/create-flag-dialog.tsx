@@ -34,7 +34,7 @@ interface CreateFlagDialogProps {
   environments: Environment[];
 }
 
-export function CreateFlagDialog({ projectSlug, environments }: CreateFlagDialogProps) {
+export function CreateFlagDialog({ projectSlug, environments: _environments }: CreateFlagDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);

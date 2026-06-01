@@ -1,8 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import { serverFetch } from "@/lib/api";
-import { getEnvironments, getFlagEnvironment } from "@/lib/api";
-import type { Flag } from "@/lib/types";
+import type { Flag, Environment, FlagEnvironmentConfig } from "@/lib/types";
 import { RuleEditor } from "@/components/rules/rule-editor";
 import { Topbar } from "@/components/layout/topbar";
 
@@ -27,7 +26,10 @@ export default async function FlagDetailPage({ params, searchParams }: FlagDetai
   const flag = flags.find((f) => f.key === key);
   if (!flag) notFound();
 
-  const environments = await getEnvironments(slug);
+  const environments = await serverFetch<Environment[]>(
+    `/api/v1/projects/${slug}/environments`,
+    token,
+  );
 
   const envSlug = (Array.isArray(sp.env) ? sp.env[0] : sp.env) ?? environments[0]?.slug;
   const targetEnv = environments.find((e) => e.slug === envSlug);
@@ -35,7 +37,10 @@ export default async function FlagDetailPage({ params, searchParams }: FlagDetai
   let envConfig;
   if (targetEnv) {
     try {
-      envConfig = await getFlagEnvironment(slug, key, envSlug);
+      envConfig = await serverFetch<FlagEnvironmentConfig>(
+        `/api/v1/projects/${slug}/flags/${key}/environments/${envSlug}`,
+        token,
+      );
     } catch {
       envConfig = {
         flagId: flag.id,

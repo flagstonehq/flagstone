@@ -28,7 +28,7 @@ function defaultRule(): Rule {
 }
 
 export function RuleEditor({
-  projectSlug, flagKey, flagType,
+  projectSlug, flagKey, flagType: _flagType,
   initialRules, initialEnabled, initialVersion,
   environments, currentEnvSlug,
 }: RuleEditorProps) {
