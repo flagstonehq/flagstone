@@ -2,7 +2,6 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
-import { createProject } from "@/lib/api";
 
 const mockRefresh = vi.fn();
 vi.mock("next/navigation", () => ({

@@ -286,7 +286,7 @@ export const handlers = [
   }),
   // Flag Environment — save
   http.put(`${API_BASE}/api/v1/projects/:slug/flags/:key/environments/:env`, async ({ request, params }) => {
-    const { slug, key, env } = params;
+    const { slug, env } = params;
     const body = (await request.json()) as { version?: number } & Record<string, unknown>;
     if (body.version !== undefined && body.version < 5 && slug === "my-app") {
       return HttpResponse.json(

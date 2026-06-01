@@ -17,10 +17,16 @@ export default async function ApiKeyPage({ params }: ApiKeysPaegProps) {
 
   if (!token) redirect("/login");
 
-  const [apiKeys, environments] = await Promise.all([
-    serverFetch<APIKey[]>(`/api/v1/projects/${slug}/api-keys`, token),
-    serverFetch<Environment[]>(`/api/v1/projects/${slug}/environments`, token),
-  ]);
+  let apiKeys: APIKey[] = [];
+  let environments: Environment[] = [];
+  try {
+    [apiKeys, environments] = await Promise.all([
+      serverFetch<APIKey[]>(`/api/v1/projects/${slug}/api-keys`, token),
+      serverFetch<Environment[]>(`/api/v1/projects/${slug}/environments`, token),
+    ]);
+  } catch {
+    // Backend endpoints may not be available yet
+  }
 
   return (
     <div className="flex h-full flex-col">
