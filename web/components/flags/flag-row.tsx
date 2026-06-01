@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Flag, Environment } from "@/lib/types";
 import { EnvToggle } from "./env-toggle";
 import { ArchiveFlagButton } from "./archive-flag-button";
@@ -17,9 +18,17 @@ interface FlagRowProps {
 }
 
 export function FlagRow({ flag, environments, projectSlug }: FlagRowProps) {
+  const firstEnv = environments[0]?.slug;
   return (
     <tr className="hover:bg-hover transition-colors">
-      <td className="text-text px-4 py-3 font-mono text-xs">{flag.key}</td>
+      <td className="text-text px-4 py-3 font-mono text-xs">
+        <Link
+          href={`/projects/${projectSlug}/flags/${flag.key}${firstEnv ? `?env=${firstEnv}` : ""}`}
+          className="text-primary hover:underline"
+        >
+          {flag.key}
+        </Link>
+      </td>
       <td className="text-text px-4 py-3">{flag.name}</td>
       <td className="px-4 py-3">
         <span

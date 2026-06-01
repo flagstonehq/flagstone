@@ -249,6 +249,62 @@ export const handlers = [
     `${API_BASE}/api/v1/projects/:slug/environments/:envId/api-keys/:keyId`,
     () => new HttpResponse(null, { status: 204 }),
   ),
+  // Flag Environment — get
+  http.get(`${API_BASE}/api/v1/projects/:slug/flags/:key/environments/:env`, ({ params }) => {
+    const { slug, key, env } = params;
+    if (slug === "my-app" && key === "new-checkout" && env === "production") {
+      return HttpResponse.json({
+        flag_id: "f1",
+        environment_id: "e3",
+        enabled: true,
+        rules: [
+          {
+            conditions: {
+              all: [
+                { attribute: "country", operator: "eq", value: "AR" },
+              ],
+            },
+            value: true,
+          },
+        ],
+        default_value: false,
+        version: 5,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    }
+    return HttpResponse.json({
+      flag_id: "f1",
+      environment_id: env === "e1" ? "e1" : "e3",
+      enabled: false,
+      rules: [],
+      default_value: false,
+      version: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+  }),
+  // Flag Environment — save
+  http.put(`${API_BASE}/api/v1/projects/:slug/flags/:key/environments/:env`, async ({ request, params }) => {
+    const { slug, key, env } = params;
+    const body = (await request.json()) as { version?: number } & Record<string, unknown>;
+    if (body.version !== undefined && body.version < 5 && slug === "my-app") {
+      return HttpResponse.json(
+        { error: { code: "VERSION_CONFLICT", message: "The flag environment configuration was modified by another request. Reload and retry." } },
+        { status: 409 },
+      );
+    }
+    return HttpResponse.json({
+      flag_id: "f1",
+      environment_id: env === "e1" ? "e1" : "e3",
+      enabled: body.enabled ?? false,
+      rules: body.rules ?? [],
+      default_value: false,
+      version: (body.version as number) + 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+  }),
   // Audit
   http.get(`${API_BASE}/api/v1/audit`, ({ request }) => {
     const url = new URL(request.url);

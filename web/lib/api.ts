@@ -1,4 +1,4 @@
-import { Environment, Project, APIKey } from "./types";
+import { APIKey } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -12,6 +12,24 @@ export class ApiError extends Error {
 }
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8080";
+
+function snakeToCamel(str: string): string {
+  return str.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
+}
+
+function transformKeys<T>(obj: unknown): T {
+  if (Array.isArray(obj)) {
+    return obj.map((item) => transformKeys(item)) as T;
+  }
+  if (obj !== null && typeof obj === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[snakeToCamel(key)] = transformKeys(value);
+    }
+    return result as T;
+  }
+  return obj as T;
+}
 
 export async function serverFetch<T>(path: string, token: string): Promise<T> {
   const res = await fetch(`${BACKEND_URL}${path}`, {
@@ -30,7 +48,8 @@ export async function serverFetch<T>(path: string, token: string): Promise<T> {
     );
   }
   if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  const data = await res.json();
+  return transformKeys<T>(data);
 }
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
@@ -50,21 +69,22 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
     );
   }
   if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  const data = await res.json();
+  return transformKeys<T>(data);
 }
 export function getProjects() {
-  return apiFetch<{ projects: import("./types").Project[] }>("/api/v1/projects");
+  return apiFetch<import("./types").Project[]>("/api/v1/projects");
 }
 export function getFlags(projectSlug: string) {
-  return apiFetch<{ flags: import("./types").Flag[] }>(`/api/v1/projects/${projectSlug}/flags`);
+  return apiFetch<import("./types").Flag[]>(`/api/v1/projects/${projectSlug}/flags`);
 }
 export function getEnvironments(projectSlug: string) {
-  return apiFetch<{ environments: import("./types").Environment[] }>(
+  return apiFetch<import("./types").Environment[]>(
     `/api/v1/projects/${projectSlug}/environments`,
   );
 }
 export function getApiKeys(projectSlug: string, envId: string) {
-  return apiFetch<{ api_keys: import("./types").APIKey[] }>(
+  return apiFetch<import("./types").APIKey[]>(
     `/api/v1/projects/${projectSlug}/environments/${envId}/api-keys`,
   );
 }
@@ -97,7 +117,7 @@ export function getAuditLog(params?: AuditLogParams) {
 }
 
 export function updateProject(projectSlug: string, data: { name: string }) {
-  return apiFetch<{ project: Project }>(`/api/v1/projects/${projectSlug}`, {
+  return apiFetch<import("./types").Project>(`/api/v1/projects/${projectSlug}`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });
@@ -110,7 +130,7 @@ export function deleteProject(projectSlug: string) {
 }
 
 export function createEnvironment(projectSlug: string, data: { name: string; slug: string }) {
-  return apiFetch<{ environment: Environment }>(`/api/v1/projects/${projectSlug}/environments`, {
+  return apiFetch<import("./types").Environment>(`/api/v1/projects/${projectSlug}/environments`, {
     method: "POST",
     body: JSON.stringify(data),
   });
@@ -123,13 +143,13 @@ export function deleteEnvironment(projectSlug: string, envId: string) {
 }
 
 export function getSegments(projectSlug: string) {
-  return apiFetch<{ segments: import("./types").Segment[] }>(
+  return apiFetch<import("./types").Segment[]>(
     `/api/v1/projects/${projectSlug}/segments`,
   );
 }
 
 export function createProject(data: { name: string; slug: string }) {
-  return apiFetch<{ project: import("./types").Project }>("/api/v1/projects", {
+  return apiFetch<import("./types").Project>("/api/v1/projects", {
     method: "POST",
     body: JSON.stringify(data),
   });
@@ -139,7 +159,7 @@ export function createFlag(
   projectSlug: string,
   data: { key: string; name: string; type: string; description?: string },
 ) {
-  return apiFetch<{ flag: import("./types").Flag }>(`/api/v1/projects/${projectSlug}/flags`, {
+  return apiFetch<import("./types").Flag>(`/api/v1/projects/${projectSlug}/flags`, {
     method: "POST",
     body: JSON.stringify(data),
   });
@@ -160,14 +180,14 @@ export function toggleFlagEnv(
 }
 
 export function getProjectApiKeys(projectSlug: string) {
-  return apiFetch<{ api_keys: APIKey[] }>(`/api/v1/projects/${projectSlug}/api-keys`);
+  return apiFetch<import("./types").APIKey[]>(`/api/v1/projects/${projectSlug}/api-keys`);
 }
 
 export function createApiKey(
   projectSlug: string,
   data: { name: string; environment_id: string; expires_at?: string },
 ) {
-  return apiFetch<{ api_key: APIKey & { raw_key: string } }>(
+  return apiFetch<import("./types").APIKey & { rawKey: string }>(
     `/api/v1/projects/${projectSlug}/api-keys`,
     { method: "POST", body: JSON.stringify(data) },
   );
@@ -177,4 +197,25 @@ export function revokeApiKey(projectSlug: string, envId: string, keyId: string) 
   return apiFetch<void>(`/api/v1/projects/${projectSlug}/environments/${envId}/api-keys/${keyId}`, {
     method: "DELETE",
   });
+}
+export function getFlag(projectSlug: string, flagKey: string) {
+  return apiFetch<import("./types").Flag>(
+    `/api/v1/projects/${projectSlug}/flags/${flagKey}`,
+  );
+}
+export function getFlagEnvironment(projectSlug: string, flagKey: string, envSlug: string) {
+  return apiFetch<import("./types").FlagEnvironmentConfig>(
+    `/api/v1/projects/${projectSlug}/flags/${flagKey}/environments/${envSlug}`,
+  );
+}
+export function saveFlagEnvironment(
+  projectSlug: string,
+  flagKey: string,
+  envSlug: string,
+  data: { enabled: boolean; rules: import("./types").Rule[]; version: number },
+) {
+  return apiFetch<import("./types").FlagEnvironmentConfig>(
+    `/api/v1/projects/${projectSlug}/flags/${flagKey}/environments/${envSlug}`,
+    { method: "PUT", body: JSON.stringify(data) },
+  );
 }

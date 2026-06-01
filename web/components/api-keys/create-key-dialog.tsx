@@ -51,12 +51,12 @@ export function CreateKeyDialog({ projectSlug, environments }: CreateKeyDialogPr
   async function onSubmit(values: FormValues) {
     setServerError(null);
     try {
-      const { api_key } = await createApiKey(projectSlug, {
+      const result = await createApiKey(projectSlug, {
         name: values.name,
         environment_id: values.environment_id,
         expires_at: values.expires_at || undefined,
       });
-      setRawKey(api_key.raw_key);
+      setRawKey(result.rawKey);
       router.refresh();
     } catch (err) {
       if (err instanceof ApiError) {

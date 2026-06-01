@@ -31,41 +31,47 @@ export type Flag = {
   updatedAt: string;
   flagEnvironments?: FlagEnvironment[];
 };
+export type LeafCondition = {
+  attribute: string;
+  operator:
+    | "eq" | "neq"
+    | "gt" | "gte" | "lt" | "lte"
+    | "in" | "not_in"
+    | "contains" | "starts_with" | "ends_with" | "matches"
+    | "exists" | "not_exists"
+    | "segment";
+  value: unknown;
+};
+export type RuleConditionNode =
+  | LeafCondition
+  | { all: RuleConditionNode[] }
+  | { any: RuleConditionNode[] }
+  | { not: RuleConditionNode };
+export type RuleRollout = {
+  percentage: number;
+  seed?: string;
+};
+export type Rule = {
+  conditions: RuleConditionNode;
+  rollout?: RuleRollout;
+  value: unknown;
+};
+export type FlagEnvironmentConfig = {
+  flagId: string;
+  environmentId: string;
+  enabled: boolean;
+  rules: Rule[];
+  defaultValue: unknown;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+};
 export type FlagEnvironment = {
   flagId: string;
   environmentId: string;
   enabled: boolean;
   rules: Rule[];
   version: number;
-};
-export type Rule = {
-  id: string;
-  conditions: Condition[];
-  returnValue: boolean | string | number;
-  rollout: number;
-};
-export type Condition = {
-  attribute: string;
-  // Must match exactly the operator strings the Go engine accepts.
-  // Unknown operators evaluate silently to false — typos here break flags
-  // without any error in the dashboard or the API.
-  operator:
-    | "eq"
-    | "neq"
-    | "gt"
-    | "gte"
-    | "lt"
-    | "lte"
-    | "in"
-    | "not_in"
-    | "contains"
-    | "starts_with"
-    | "ends_with"
-    | "matches"
-    | "exists"
-    | "not_exists"
-    | "segment";
-  value: string | number | boolean | string[];
 };
 export type Segment = {
   id: string;

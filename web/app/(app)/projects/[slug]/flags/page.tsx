@@ -17,9 +17,9 @@ export default async function FlagsPage({ params }: FlagsPageProps) {
   const token = cookieStore.get("access_token")?.value;
   if (!token) redirect("/login");
 
-  const [{ flags }, { environments }] = await Promise.all([
-    serverFetch<{ flags: Flag[] }>(`/api/v1/projects/${slug}/flags`, token),
-    serverFetch<{ environments: Environment[] }>(
+  const [flags, environments] = await Promise.all([
+    serverFetch<Flag[]>(`/api/v1/projects/${slug}/flags`, token),
+    serverFetch<Environment[]>(
       `/api/v1/projects/${slug}/environments`,
       token,
     ),

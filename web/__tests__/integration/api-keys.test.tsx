@@ -48,16 +48,14 @@ describe("CreateKeyDialog", () => {
     vi.spyOn(global, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
-          api_key: {
-            id: "ak-new",
-            environment_id: "e1",
-            name: "My Key",
-            key_prefix: "fs_live_new",
-            last_used_at: null,
-            expires_at: null,
-            created_at: new Date().toISOString(),
-            raw_key: "fs_live_new_secret123",
-          },
+          id: "ak-new",
+          environment_id: "e1",
+          name: "My Key",
+          key_prefix: "fs_live_new",
+          last_used_at: null,
+          expires_at: null,
+          created_at: new Date().toISOString(),
+          raw_key: "fs_live_new_secret123",
         }),
         { status: 201, headers: { "Content-Type": "application/json" } },
       ),

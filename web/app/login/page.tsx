@@ -1,16 +1,26 @@
-export default function FlagsLoading() {
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { LoginForm } from "@/components/login/login-form";
+
+export default async function LoginPage() {
+  const cookieStore = await cookies();
+  if (cookieStore.get("access_token")) {
+    redirect("/projects");
+  }
+
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-border flex h-14 items-center justify-between border-b px-6">
-        <div className="bg-border h-5 w-16 animate-pulse rounded" />
-        <div className="bg-border h-9 w-28 animate-pulse rounded" />
+    <main className="min-h-screen flex items-center justify-center bg-bg">
+      <div className="w-full max-w-sm">
+        <div className="bg-surface rounded-xl border border-border p-8 shadow-sm">
+          <div className="mb-6 text-center">
+            <div className="inline-flex items-center justify-center w-full mb-2">
+              <span className="text-2xl font-bold text-primary">⚑ Flagstone</span>
+            </div>
+            <p className="text-sm text-text-secondary">Feature flags for your team</p>
+          </div>
+          <LoginForm />
+        </div>
       </div>
-      <div className="space-y-2 p-6">
-        <div className="bg-border h-10 w-full animate-pulse rounded" />
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="bg-border h-14 w-full animate-pulse rounded opacity-60" />
-        ))}
-      </div>
-    </div>
+    </main>
   );
 }

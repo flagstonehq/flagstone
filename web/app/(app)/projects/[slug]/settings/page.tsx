@@ -19,13 +19,10 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
   const token = cookieStore.get("access_token")?.value;
   if (!token) redirect("/login");
 
-  const [projectRes, envRes] = await Promise.all([
-    serverFetch<{ project: Project }>(`/api/v1/projects/${slug}`, token),
-    serverFetch<{ environments: Environment[] }>(`/api/v1/projects/${slug}/environments`, token),
+  const [project, environments] = await Promise.all([
+    serverFetch<Project>(`/api/v1/projects/${slug}`, token),
+    serverFetch<Environment[]>(`/api/v1/projects/${slug}/environments`, token),
   ]);
-
-  const { project } = projectRes;
-  const { environments } = envRes;
 
   return (
     <div className="flex h-full flex-col">
