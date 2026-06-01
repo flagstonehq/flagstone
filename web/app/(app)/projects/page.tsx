@@ -12,10 +12,7 @@ export default async function ProjectsPage() {
   const token = cookieStore.get("access_token")?.value;
   if (!token) redirect("/login");
 
-  const { projects } = await serverFetch<{ projects: Project[] }>(
-    "/api/v1/projects",
-    token,
-  );
+  const projects = await serverFetch<Project[]>("/api/v1/projects", token);
 
   return (
     <div className="flex flex-col h-full">

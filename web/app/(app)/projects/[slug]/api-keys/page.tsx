@@ -17,9 +17,9 @@ export default async function ApiKeyPage({ params }: ApiKeysPaegProps) {
 
   if (!token) redirect("/login");
 
-  const [{ api_keys }, { environments }] = await Promise.all([
-    serverFetch<{ api_keys: APIKey[] }>(`/api/v1/projects/${slug}/api-keys`, token),
-    serverFetch<{ environments: Environment[] }>(`/api/v1/projects/${slug}/environments`, token),
+  const [apiKeys, environments] = await Promise.all([
+    serverFetch<APIKey[]>(`/api/v1/projects/${slug}/api-keys`, token),
+    serverFetch<Environment[]>(`/api/v1/projects/${slug}/environments`, token),
   ]);
 
   return (
@@ -29,7 +29,7 @@ export default async function ApiKeyPage({ params }: ApiKeysPaegProps) {
         action={<CreateKeyDialog projectSlug={slug} environments={environments} />}
       />
       <main className="flex-1 overflow-y-auto p-6">
-        <ApiKeysTable apiKeys={api_keys} environments={environments} projectSlug={slug} />
+        <ApiKeysTable apiKeys={apiKeys} environments={environments} projectSlug={slug} />
       </main>
     </div>
   );

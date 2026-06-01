@@ -75,3 +75,43 @@ export const createEnvironmentSchema = z.object({
     .max(50)
     .regex(/^[a-z0-9-]+$/, "Only lowercase letters, numbers, and hyphens"),
 });
+
+const leafConditionSchema = z.object({
+  attribute: z.string().min(1, "Attribute is required"),
+  operator: z.enum([
+    "eq", "neq", "gt", "gte", "lt", "lte",
+    "in", "not_in", "contains", "starts_with", "ends_with", "matches",
+    "exists", "not_exists", "segment",
+  ]),
+  value: z.unknown(),
+});
+
+export type LeafConditionSchemaType = z.infer<typeof leafConditionSchema>;
+
+export type ConditionNodeSchemaType =
+  | LeafConditionSchemaType
+  | { all: ConditionNodeSchemaType[] }
+  | { any: ConditionNodeSchemaType[] }
+  | { not: ConditionNodeSchemaType };
+
+export const conditionNodeSchema: z.ZodType<ConditionNodeSchemaType> = z.lazy(() =>
+  z.union([
+    leafConditionSchema,
+    z.object({ all: z.array(conditionNodeSchema).min(1) }),
+    z.object({ any: z.array(conditionNodeSchema).min(1) }),
+    z.object({ not: conditionNodeSchema }),
+  ]),
+);
+
+export const ruleSchema = z.object({
+  conditions: conditionNodeSchema,
+  rollout: z
+    .object({
+      percentage: z.number().int().min(0).max(100),
+      seed: z.string().optional(),
+    })
+    .optional(),
+  value: z.unknown(),
+});
+
+export const rulesPayloadSchema = z.array(ruleSchema);
