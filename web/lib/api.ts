@@ -1,4 +1,4 @@
-import { Environment, Project } from "./types";
+import { Environment, Project, APIKey } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -136,4 +136,24 @@ export function toggleFlagEnv(
     `/api/v1/projects/${projectSlug}/flags/${flagKey}/environments/${envSlug}`,
     { method: "PATCH", body: JSON.stringify({ enabled }) },
   );
+}
+
+export function getProjectApiKeys(projectSlug: string) {
+  return apiFetch<{ api_keys: APIKey[] }>(`/api/v1/projects/${projectSlug}/api-keys`);
+}
+
+export function createApiKey(
+  projectSlug: string,
+  data: { name: string; environment_id: string; expires_at?: string },
+) {
+  return apiFetch<{ api_key: APIKey & { raw_key: string } }>(
+    `/api/v1/projects/${projectSlug}/api-keys`,
+    { method: "POST", body: JSON.stringify(data) },
+  );
+}
+
+export function revokeApiKey(projectSlug: string, envId: string, keyId: string) {
+  return apiFetch<void>(`/api/v1/projects/${projectSlug}/environments/${envId}/api-keys/${keyId}`, {
+    method: "DELETE",
+  });
 }

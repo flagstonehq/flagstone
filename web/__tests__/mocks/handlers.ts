@@ -193,4 +193,60 @@ export const handlers = [
     `${API_BASE}/api/v1/projects/:slug/environments/:envId`,
     () => new HttpResponse(null, { status: 204 }),
   ),
+  // API Keys — project-level listing
+  http.get(`${API_BASE}/api/v1/projects/:slug/api-keys`, ({ params }) => {
+    const { slug } = params;
+    if (slug === "my-app") {
+      return HttpResponse.json({
+        api_keys: [
+          {
+            id: "ak1",
+            environment_id: "e1",
+            name: "Development Key",
+            key_prefix: "fs_dev_abc",
+            last_used_at: new Date().toISOString(),
+            expires_at: null,
+            created_at: new Date(Date.now() - 604800000).toISOString(),
+          },
+          {
+            id: "ak2",
+            environment_id: "e3",
+            name: "Production Key",
+            key_prefix: "fs_live_xyz",
+            last_used_at: null,
+            expires_at: new Date(Date.now() + 86400000 * 30).toISOString(),
+            created_at: new Date(Date.now() - 86400000).toISOString(),
+          },
+        ],
+      });
+    }
+    return HttpResponse.json({ api_keys: [] });
+  }),
+  // Create API Key
+  http.post(`${API_BASE}/api/v1/projects/:slug/api-keys`, async ({ request }) => {
+    const body = (await request.json()) as {
+      name: string;
+      environment_id: string;
+    };
+    return HttpResponse.json(
+      {
+        api_key: {
+          id: "ak-new",
+          environment_id: body.environment_id,
+          name: body.name,
+          key_prefix: "fs_live_new",
+          last_used_at: null,
+          expires_at: null,
+          created_at: new Date().toISOString(),
+          raw_key: "fs_live_new_abc123def456ghi789",
+        },
+      },
+      { status: 201 },
+    );
+  }),
+  // Revoke API Key
+  http.delete(
+    `${API_BASE}/api/v1/projects/:slug/environments/:envId/api-keys/:keyId`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
 ];
