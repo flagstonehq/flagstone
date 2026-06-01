@@ -249,4 +249,58 @@ export const handlers = [
     `${API_BASE}/api/v1/projects/:slug/environments/:envId/api-keys/:keyId`,
     () => new HttpResponse(null, { status: 204 }),
   ),
+  // Audit
+  http.get(`${API_BASE}/api/v1/audit`, ({ request }) => {
+    const url = new URL(request.url);
+    const actionFilter = url.searchParams.get("action");
+    const resourceFilter = url.searchParams.get("resource_type");
+    const actorTypeFilter = url.searchParams.get("actor_type");
+    const limit = Math.min(100, Number(url.searchParams.get("limit") ?? 20));
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    const all = [
+      {
+        id: "00000000-0000-4000-a000-000000000001",
+        actor_id: "00000000-0000-4000-a000-0000000000a1",
+        actor_type: "user",
+        action: "project.created",
+        resource_type: "project",
+        resource_id: "00000000-0000-4000-a000-0000000000b1",
+        created_at: new Date(Date.now() - 60_000).toISOString(),
+      },
+      {
+        id: "00000000-0000-4000-a000-000000000002",
+        actor_id: "00000000-0000-4000-a000-0000000000a1",
+        actor_type: "user",
+        action: "flag.created",
+        resource_type: "flag",
+        resource_id: "00000000-0000-4000-a000-0000000000b2",
+        created_at: new Date(Date.now() - 300_000).toISOString(),
+      },
+      {
+        id: "00000000-0000-4000-a000-000000000003",
+        actor_id: "00000000-0000-4000-a000-0000000000a3",
+        actor_type: "api_key",
+        action: "flag.toggled",
+        resource_type: "flag",
+        resource_id: "00000000-0000-4000-a000-0000000000b2",
+        created_at: new Date(Date.now() - 3_600_000).toISOString(),
+      },
+      {
+        id: "00000000-0000-4000-a000-000000000004",
+        actor_id: null,
+        actor_type: "system",
+        action: "flag.archived",
+        resource_type: "flag",
+        resource_id: "00000000-0000-4000-a000-0000000000b3",
+        created_at: new Date(Date.now() - 86_400_000).toISOString(),
+      },
+    ];
+    let filtered = all;
+    if (actionFilter) filtered = filtered.filter((e) => e.action === actionFilter);
+    if (resourceFilter) filtered = filtered.filter((e) => e.resource_type === resourceFilter);
+    if (actorTypeFilter) filtered = filtered.filter((e) => e.actor_type === actorTypeFilter);
+    const total = filtered.length;
+    const entries = filtered.slice(offset, offset + limit);
+    return HttpResponse.json({ entries, total, limit, offset });
+  }),
 ];

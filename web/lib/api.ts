@@ -68,11 +68,32 @@ export function getApiKeys(projectSlug: string, envId: string) {
     `/api/v1/projects/${projectSlug}/environments/${envId}/api-keys`,
   );
 }
-export function getAuditLog(projectSlug: string, params?: Record<string, string>) {
-  const qs = params ? "?" + new URLSearchParams(params) : "";
-  return apiFetch<{ entries: import("./types").AuditEntry[] }>(
-    `/api/v1/projects/${projectSlug}/audit${qs}`,
-  );
+export type AuditLogParams = {
+  actor_type?: "user" | "api_key" | "system";
+  action?: string;
+  resource_type?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+  offset?: number;
+};
+export type AuditLogPage = {
+  entries: import("./types").AuditEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+export function getAuditLog(params?: AuditLogParams) {
+  const search = new URLSearchParams();
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== "") {
+        search.set(key, String(value));
+      }
+    }
+  }
+  const qs = search.toString();
+  return apiFetch<AuditLogPage>(`/api/v1/audit${qs ? "?" + qs : ""}`);
 }
 
 export function updateProject(projectSlug: string, data: { name: string }) {

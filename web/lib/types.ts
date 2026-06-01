@@ -50,11 +50,20 @@ export type Condition = {
   // Unknown operators evaluate silently to false — typos here break flags
   // without any error in the dashboard or the API.
   operator:
-    | "eq" | "neq"
-    | "gt" | "gte" | "lt" | "lte"
-    | "in" | "not_in"
-    | "contains" | "starts_with" | "ends_with" | "matches"
-    | "exists" | "not_exists"
+    | "eq"
+    | "neq"
+    | "gt"
+    | "gte"
+    | "lt"
+    | "lte"
+    | "in"
+    | "not_in"
+    | "contains"
+    | "starts_with"
+    | "ends_with"
+    | "matches"
+    | "exists"
+    | "not_exists"
     | "segment";
   value: string | number | boolean | string[];
 };
@@ -79,11 +88,13 @@ export type APIKey = {
 };
 export type AuditEntry = {
   id: string;
-  actorEmail: string | null;
+  actorId: string | null;
   actorType: "user" | "api_key" | "system";
   action: string;
   resourceType: string;
   resourceId: string | null;
   changes: unknown;
+  ipAddress: string | null;
+  userAgent: string | null;
   createdAt: string;
 };
