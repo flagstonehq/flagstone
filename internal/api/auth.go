@@ -114,13 +114,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.logger.Warn("login: clear attempts", zap.Error(err))
 	}
 
-	accessToken, err := auth.GenerateAccessToken(user.ID, tenantID, role, s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
-	if err != nil {
-		s.logger.Error("login: generate access token", zap.Error(err))
-		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
-		return
-	}
-
 	refreshRaw, refreshHash, err := auth.GenerateRefreshToken(32)
 	if err != nil {
 		s.logger.Error("login: generate refresh token", zap.Error(err))
@@ -140,6 +133,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.stores.Sessions.Create(ctx, session); err != nil {
 		s.logger.Error("login: create session", zap.Error(err))
+		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		return
+	}
+
+	accessToken, err := auth.GenerateAccessToken(user.ID, tenantID, role, s.cfg.JWTSecret, s.cfg.AccessTokenTTL, session.ID)
+	if err != nil {
+		s.logger.Error("login: generate access token", zap.Error(err))
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		return
 	}
@@ -251,7 +251,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := auth.GenerateAccessToken(user.ID, session.TenantID, role, s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
+	accessToken, err := auth.GenerateAccessToken(user.ID, session.TenantID, role, s.cfg.JWTSecret, s.cfg.AccessTokenTTL, newSession.ID)
 	if err != nil {
 		s.logger.Error("refresh: generate access token", zap.Error(err))
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")

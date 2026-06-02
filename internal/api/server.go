@@ -32,6 +32,10 @@ type Server struct {
 	// response times constant when the email isn't found in the DB. Without
 	// it, the absence of a bcrypt comparison would leak which emails exist.
 	fakePasswordHash string
+
+	// Rate limiters per sensitive endpoint (in-process, per client IP).
+	loginLimiter   *middleware.IPRateLimiter
+	refreshLimiter *middleware.IPRateLimiter
 }
 
 // NewServer creates a new API Server with the given dependencies.
@@ -47,6 +51,8 @@ func NewServer(stores *storage.Stores, dbPool *pgxpool.Pool, cfg *config.Config,
 		logger:           logger,
 		engine:           engine.New(logger),
 		fakePasswordHash: fake,
+		loginLimiter:     middleware.NewIPRateLimiter(5, time.Minute),
+		refreshLimiter:   middleware.NewIPRateLimiter(10, time.Minute),
 	}
 }
 
@@ -65,8 +71,16 @@ func (s *Server) Routes() http.Handler {
 	)
 	mux.Handle("POST /api/v1/setup", recoverMW(setupHandler))
 
+	setupStatusHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleSetupStatus),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+	)
+	mux.Handle("GET /api/v1/setup/status", recoverMW(setupStatusHandler))
+
 	loginHandler := s.withMiddleware(
 		http.HandlerFunc(s.handleLogin),
+		middleware.RateLimit(s.loginLimiter),
 		middleware.RequestID(),
 		middleware.Logger(s.logger),
 		middleware.BodyLimit(1<<20),
@@ -76,6 +90,7 @@ func (s *Server) Routes() http.Handler {
 
 	refreshHandler := s.withMiddleware(
 		http.HandlerFunc(s.handleRefresh),
+		middleware.RateLimit(s.refreshLimiter),
 		middleware.RequestID(),
 		middleware.Logger(s.logger),
 	)
@@ -88,6 +103,49 @@ func (s *Server) Routes() http.Handler {
 		middleware.AuthJWT(s.cfg.JWTSecret),
 	)
 	mux.Handle("POST /api/v1/auth/logout", recoverMW(logoutHandler))
+
+	getMeHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleGetMe),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleViewer),
+	)
+	mux.Handle("GET /api/v1/auth/me", recoverMW(getMeHandler))
+
+	changePasswordHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleChangePassword),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+	)
+	mux.Handle("PATCH /api/v1/auth/me/password", recoverMW(changePasswordHandler))
+
+	listSessionsHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleListSessions),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+	)
+	mux.Handle("GET /api/v1/auth/sessions", recoverMW(listSessionsHandler))
+
+	revokeSessionHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleRevokeSession),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+	)
+	mux.Handle("DELETE /api/v1/auth/sessions/{id}", recoverMW(revokeSessionHandler))
+
+	revokeAllSessionsHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleRevokeAllSessions),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+	)
+	mux.Handle("DELETE /api/v1/auth/sessions", recoverMW(revokeAllSessionsHandler))
 
 	projectsCreateHandler := s.withMiddleware(
 		http.HandlerFunc(s.handleCreateProject),
