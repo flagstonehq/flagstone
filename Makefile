@@ -1,9 +1,10 @@
 # =============================================================================
 # Flagstone
 # =============================================================================
-.PHONY: help build run test test-int test-int-v test-cover lint fmt migrate migrate-down migrate-create setup seed clean docker-build docker-run
+.PHONY: help build run test test-int test-int-v test-cover lint fmt migrate migrate-down migrate-create setup seed seed-build clean docker-build docker-run
 
 BINARY := bin/flagstone
+SEED_BINARY := bin/seed
 MODULE := github.com/thomas-vilte/flagstone
 
 DATABASE_URL ?= postgres://flagstone:flagstone_dev@localhost:5432/flagstone?sslmode=disable
@@ -21,6 +22,9 @@ build:
 
 run:
 	go run ./cmd/flagstone
+
+seed-build:
+	go build -o $(SEED_BINARY) ./cmd/seed
 
 fmt:
 	go fmt ./...
@@ -72,28 +76,38 @@ migrate-create:
 	migrate create -ext sql -dir migrations -seq $(NAME)
 
 # -----------------------------------------------------------------------------
-# Docker (Postgres + Redis)
+# Docker
 # -----------------------------------------------------------------------------
 
-setup:
-	docker compose up -d
+setup: ## Start only Postgres + Redis (for local Go development)
+	docker compose up -d postgres redis
 	@echo "Waiting for Postgres..."
 	@until docker compose exec postgres pg_isready -U flagstone >/dev/null 2>&1; do sleep 1; done
-	@echo "Dependencies ready. Run 'make migrate' to initialize the database."
+	@echo "Dependencies ready. Run 'make migrate && make run' to start developing."
 
-down:
+demo: ## Start the full stack (postgres, redis, migrate, api, web) + seed demo data
+	docker compose up -d
+	docker compose --profile seed run --rm seed
+	@echo ""
+	@echo "Dashboard: http://localhost:3000"
+	@echo "API:       http://localhost:8080"
+	@echo "Login:     admin@acme.com / password123"
+
+down: ## Stop all services
 	docker compose down
 
-seed: ## Populate dev database with demo data (server must be running on :8080)
-	@bash scripts/seed.sh
+seed: seed-build ## Populate dev database with demo data (server must be running on :8080)
+	@./$(SEED_BINARY)
 
-clean:
+clean: ## Stop all services and delete volumes (fresh DB)
 	docker compose down -v
 
-docker-build:
+docker-build: ## Build the Docker image
 	docker build -t flagstone:latest .
 
-docker-run:
+docker-run: ## Run the Docker image standalone (needs external Postgres + Redis)
 	docker run --rm -p 8080:8080 \
 		-e DATABASE_URL="$(DATABASE_URL)" \
+		-e REDIS_URL="redis://localhost:6379" \
+		-e JWT_SECRET="change-me-in-production-min-32-chars" \
 		flagstone:latest

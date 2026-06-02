@@ -407,7 +407,8 @@ Goal: differentiation features and operations.
 ```
 flagstone/
 ├── cmd/
-│   └── flagstone/          # Server entry point (Go binary)
+│   ├── flagstone/          # Server entry point (Go binary)
+│   └── seed/               # Demo data seeder (idempotent)
 ├── internal/
 │   ├── api/                # HTTP handlers and routing
 │   ├── auth/               # API keys, JWT, sessions, RBAC, plan enforcement
@@ -432,8 +433,8 @@ flagstone/
 ├── diagrams/               # Excalidraw architecture diagrams (SVG + PNG)
 ├── .github/
 │   └── workflows/          # GitHub Actions CI/CD
-├── docker-compose.yml      # One-command local dev (api + web + postgres + redis)
-├── Dockerfile.api          # Go API production image (~25 MB)
+├── docker-compose.yml      # One-command local dev (api + web + postgres + redis + migrate + seed)
+├── Dockerfile              # Multi-stage Go build (API + seed + migrate CLI)
 ├── Makefile                # Dev commands (build, test, migrate, lint)
 ├── DESIGN.md               # Architecture decisions and rationale
 ├── SECURITY.md             # Auth model, threat model, restore runbook
@@ -445,37 +446,44 @@ flagstone/
 
 ## Local Development
 
-### Requirements
-
-- Go 1.22+
-- Docker and Docker Compose
-- Make
-- [golang-migrate](https://github.com/golang-migrate/migrate) (for DB migrations)
-
-### Setup
+### Quickstart (Docker — recommended)
 
 ```bash
 git clone https://github.com/thomas-vilte/flagstone
 cd flagstone
-
-# Start Postgres + Redis
-make setup
-
-# Run database migrations
-make migrate
-
-# Start the server
-make run
+docker compose up -d                        # postgres, redis, migrate, api, web
+docker compose --profile seed run --rm seed  # one-time demo data
+open http://localhost:3000                   # Login: admin@acme.com / password123
 ```
 
-The API will be available at `http://localhost:8080`. Test with:
+This starts everything: Postgres, Redis, runs migrations, the Go API, and the Next.js dashboard.
+The `seed` service provisions a demo tenant, project, flags, segments, and API keys.
+
+### Developer setup (Go + Node)
+
+If you prefer running Go and Node locally for faster iteration:
 
 ```bash
-# Liveness check — is the process alive?
+# Requirements: Go 1.22+, Node 18+, Make, golang-migrate CLI
+
+# Start only Postgres + Redis
+docker compose up -d postgres redis
+
+# Run migrations and start the API
+make migrate && make run
+
+# In another terminal — start the dashboard
+cd web && npm install && npm run dev
+```
+
+### Health checks
+
+```bash
+# Liveness — is the process alive?
 curl http://localhost:8080/healthz
 # {"status":"ok","version":"dev","uptime_seconds":12}
 
-# Readiness check — can it serve traffic? (checks Postgres + Redis)
+# Readiness — can it serve traffic? (checks Postgres + Redis)
 curl http://localhost:8080/readyz
 # {"status":"ready","checks":{"postgres":{"status":"up","latency_ms":2},"redis":{"status":"up","latency_ms":1}}}
 ```
@@ -490,6 +498,7 @@ make test-int    # Integration tests (needs Postgres + Redis)
 make lint        # Run golangci-lint
 make fmt         # Format code
 make migrate     # Run migrations up
+make seed        # Populate dev DB with demo data (server must be running)
 make down        # Stop docker dependencies
 make clean       # Stop + delete volumes (fresh DB)
 ```
