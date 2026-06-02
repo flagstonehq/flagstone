@@ -79,6 +79,7 @@ export type Segment = {
   key: string;
   name: string;
   description: string | null;
+  rules: RuleConditionNode;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -91,6 +92,21 @@ export type APIKey = {
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
+};
+export type User = {
+  id: string;
+  email: string;
+  role: "owner" | "admin" | "member" | "viewer";
+  createdAt: string;
+  lastLoginAt: string | null;
+};
+export type Session = {
+  id: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  expiresAt: string;
+  isCurrent: boolean;
 };
 export type AuditEntry = {
   id: string;

@@ -15,7 +15,7 @@ function snakeToCamel(str: string): string {
   return str.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
 }
 
-function transformKeys<T>(obj: unknown): T {
+export function transformKeys<T>(obj: unknown): T {
   if (Array.isArray(obj)) {
     return obj.map((item) => transformKeys(item)) as T;
   }
@@ -83,7 +83,7 @@ export function getEnvironments(projectSlug: string) {
 }
 export function getApiKeys(projectSlug: string, envId: string) {
   return apiFetch<import("./types").APIKey[]>(
-    `/api/v1/projects/${projectSlug}/environments/${envId}/api-keys`,
+    `/api/v1/projects/${projectSlug}/environments/${envId}/apikeys`,
   );
 }
 export type AuditLogParams = {
@@ -145,6 +145,35 @@ export function getSegments(projectSlug: string) {
     `/api/v1/projects/${projectSlug}/segments`,
   );
 }
+export function getSegment(projectSlug: string, key: string) {
+  return apiFetch<import("./types").Segment>(
+    `/api/v1/projects/${projectSlug}/segments/${key}`,
+  );
+}
+export function createSegment(
+  projectSlug: string,
+  data: { key: string; name: string; description?: string; rules?: unknown },
+) {
+  return apiFetch<import("./types").Segment>(
+    `/api/v1/projects/${projectSlug}/segments`,
+    { method: "POST", body: JSON.stringify(data) },
+  );
+}
+export function updateSegment(
+  projectSlug: string,
+  key: string,
+  data: { name?: string; description?: string; rules?: unknown },
+) {
+  return apiFetch<import("./types").Segment>(
+    `/api/v1/projects/${projectSlug}/segments/${key}`,
+    { method: "PUT", body: JSON.stringify(data) },
+  );
+}
+export function archiveSegment(projectSlug: string, key: string) {
+  return apiFetch<void>(`/api/v1/projects/${projectSlug}/segments/${key}`, {
+    method: "DELETE",
+  });
+}
 
 export function createProject(data: { name: string; slug: string }) {
   return apiFetch<import("./types").Project>("/api/v1/projects", {
@@ -205,6 +234,24 @@ export function getFlagEnvironment(projectSlug: string, flagKey: string, envSlug
   return apiFetch<import("./types").FlagEnvironmentConfig>(
     `/api/v1/projects/${projectSlug}/flags/${flagKey}/environments/${envSlug}`,
   );
+}
+export function getMe() {
+  return apiFetch<import("./types").User>("/api/auth/me");
+}
+export function changePassword(data: { current_password: string; new_password: string; confirm_password: string }) {
+  return apiFetch<void>("/api/v1/auth/me/password", {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+export function getSessions() {
+  return apiFetch<import("./types").Session[]>("/api/v1/auth/sessions");
+}
+export function revokeSession(id: string) {
+  return apiFetch<void>(`/api/v1/auth/sessions/${id}`, { method: "DELETE" });
+}
+export function revokeAllSessions() {
+  return apiFetch<void>("/api/v1/auth/sessions", { method: "DELETE" });
 }
 export function saveFlagEnvironment(
   projectSlug: string,

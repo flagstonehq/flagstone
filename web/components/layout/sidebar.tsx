@@ -12,6 +12,7 @@ import {
   Key,
   ScrollText,
   Settings,
+  User,
   LogOut,
   ChevronLeft,
 } from "lucide-react";
@@ -25,6 +26,7 @@ function useProjectSlug(): string | null {
 
 const GLOBAL_NAV = [
   { href: "/projects", label: "Projects", icon: FolderOpen },
+  { href: "/account",  label: "Account",  icon: User },
 ];
 
 function projectNav(slug: string) {
@@ -43,7 +45,7 @@ export function Sidebar() {
   const router = useRouter();
   const projectSlug = useProjectSlug();
 
-  const nav = projectSlug ? projectNav(projectSlug) : GLOBAL_NAV;
+  const nav = projectSlug ? [...GLOBAL_NAV, ...projectNav(projectSlug)] : GLOBAL_NAV;
 
   function closeMobile() {
     setMobileOpen(false);
