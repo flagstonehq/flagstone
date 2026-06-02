@@ -19,7 +19,7 @@ func TestAuthJWT_validToken(t *testing.T) {
 	userID := uuid.New()
 	tenantID := uuid.New()
 
-	token, err := auth.GenerateAccessToken(userID, tenantID, "admin", secret, 15*time.Minute)
+	token, err := auth.GenerateAccessToken(userID, tenantID, "admin", secret, 15*time.Minute, uuid.Nil)
 	require.NoError(t, err)
 
 	handler := AuthJWT(secret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +74,7 @@ func TestAuthJWT_expiredToken(t *testing.T) {
 	userID := uuid.New()
 	tenantID := uuid.New()
 
-	claims, err := auth.NewClaims(userID, tenantID, "viewer", time.Now().Add(-2*time.Minute), 1*time.Minute)
+	claims, err := auth.NewClaims(userID, tenantID, "viewer", time.Now().Add(-2*time.Minute), 1*time.Minute, uuid.Nil)
 	require.NoError(t, err)
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -97,7 +97,7 @@ func TestAuthJWT_wrongSecret(t *testing.T) {
 	userID := uuid.New()
 	tenantID := uuid.New()
 
-	token, err := auth.GenerateAccessToken(userID, tenantID, "owner", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 15*time.Minute)
+	token, err := auth.GenerateAccessToken(userID, tenantID, "owner", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 15*time.Minute, uuid.Nil)
 	require.NoError(t, err)
 
 	handler := AuthJWT("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

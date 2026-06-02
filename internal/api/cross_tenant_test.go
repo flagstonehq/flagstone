@@ -46,7 +46,7 @@ func seedCrossTenantFixture(t *testing.T) crossTenantFixture {
 	require.NoError(t, testServer.stores.Members.Add(ctx,
 		&storage.TenantMember{TenantID: tenantA.ID, UserID: userA.ID, Role: "admin"}))
 
-	tokenA, err := auth.GenerateAccessToken(userA.ID, tenantA.ID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL)
+	tokenA, err := auth.GenerateAccessToken(userA.ID, tenantA.ID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL, uuid.Nil)
 	require.NoError(t, err)
 
 	projectB := &storage.Project{TenantID: tenantB.ID, Slug: "xt-proj-b", Name: "Project B"}

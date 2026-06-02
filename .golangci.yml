@@ -45,6 +45,8 @@ linters:
         - G115
 
   exclusions:
+    paths:
+      - web/
     rules:
       - path: '_test\.go'
         linters:

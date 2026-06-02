@@ -298,7 +298,7 @@ func TestLogout_Success(t *testing.T) {
 	tenantID, userID, _ := seedAuthUser(t)
 	rawRefresh := seedSession(t, tenantID, userID)
 
-	accessToken, err := auth.GenerateAccessToken(userID, tenantID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL)
+	accessToken, err := auth.GenerateAccessToken(userID, tenantID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL, uuid.Nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
@@ -576,7 +576,7 @@ func TestLogout_RevokesRefreshToken(t *testing.T) {
 	tenantID, userID, _ := seedAuthUser(t)
 	rawRefresh := seedSession(t, tenantID, userID)
 
-	accessToken, err := auth.GenerateAccessToken(userID, tenantID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL)
+	accessToken, err := auth.GenerateAccessToken(userID, tenantID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL, uuid.Nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)

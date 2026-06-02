@@ -31,7 +31,7 @@ func seedProjectUser(t *testing.T) (tenantID, userID uuid.UUID, token string) {
 	member := &storage.TenantMember{TenantID: tenant.ID, UserID: user.ID, Role: "admin"}
 	require.NoError(t, testServer.stores.Members.Add(context.Background(), member))
 
-	accessToken, err := auth.GenerateAccessToken(user.ID, tenant.ID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL)
+	accessToken, err := auth.GenerateAccessToken(user.ID, tenant.ID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL, uuid.Nil)
 	require.NoError(t, err)
 
 	return tenant.ID, user.ID, accessToken
@@ -258,7 +258,7 @@ func TestProjects_CrossTenantIsolation(t *testing.T) {
 	member := &storage.TenantMember{TenantID: tenantA.ID, UserID: userA.ID, Role: "admin"}
 	require.NoError(t, testServer.stores.Members.Add(context.Background(), member))
 
-	tokenA, err := auth.GenerateAccessToken(userA.ID, tenantA.ID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL)
+	tokenA, err := auth.GenerateAccessToken(userA.ID, tenantA.ID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL, uuid.Nil)
 	require.NoError(t, err)
 
 	require.NoError(t, testServer.stores.Projects.Create(context.Background(),
