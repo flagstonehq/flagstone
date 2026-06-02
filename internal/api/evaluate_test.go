@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/thomas-vilte/flagstone/internal/auth"
-	"github.com/thomas-vilte/flagstone/internal/engine"
+	"github.com/thomas-vilte/flagstone/pkg/engine"
 	"github.com/thomas-vilte/flagstone/internal/storage"
 )
 

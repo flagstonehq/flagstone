@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/thomas-vilte/flagstone/internal/api/middleware"
-	"github.com/thomas-vilte/flagstone/internal/engine"
+	"github.com/thomas-vilte/flagstone/pkg/engine"
 	"github.com/thomas-vilte/flagstone/internal/storage"
 	"go.uber.org/zap"
 )
