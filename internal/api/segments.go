@@ -85,8 +85,10 @@ func validateCreateSegment(req *createSegmentRequest) error {
 		return fmt.Errorf("description must not exceed 2000 characters")
 	}
 
-	if len(req.Rules) > 0 && !json.Valid(req.Rules) {
-		return fmt.Errorf("rules must be valid JSON")
+	if len(req.Rules) > 0 {
+		if err := ValidateSegmentRules(req.Rules); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -308,9 +310,11 @@ func (s *Server) handleUpdateSegment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Rules != nil {
-		if len(*req.Rules) > 0 && !json.Valid(*req.Rules) {
-			middleware.Error(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "rules must be valid JSON.")
-			return
+		if len(*req.Rules) > 0 {
+			if err := ValidateSegmentRules(*req.Rules); err != nil {
+				middleware.Error(w, r, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+				return
+			}
 		}
 		segment.Rules = *req.Rules
 	}
