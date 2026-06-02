@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useOptimistic, useTransition, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Switch } from "@/components/ui/switch";
 import { toggleFlagEnv } from "@/lib/api";
@@ -18,29 +18,30 @@ export function EnvToggle({
   defaultEnabled = false,
 }: EnvToggleProps) {
   const router = useRouter();
-  const [enabled, setEnabled] = useState(defaultEnabled);
-  const [loading, setLoading] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [optimisticEnabled, setOptimisticEnabled] = useOptimistic(defaultEnabled);
   const [error, setError] = useState(false);
-  async function handleToggle(next: boolean) {
-    setLoading(true);
+
+  function handleToggle(next: boolean) {
     setError(false);
-    setEnabled(next);
-    try {
-      await toggleFlagEnv(projectSlug, flagKey, envSlug, next);
-      router.refresh();
-    } catch {
-      setEnabled(!next);
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
+    startTransition(async () => {
+      setOptimisticEnabled(next);
+      try {
+        await toggleFlagEnv(projectSlug, flagKey, envSlug, next);
+        router.refresh();
+      } catch {
+        setError(true);
+        // useOptimistic reverts to defaultEnabled automatically when transition ends
+      }
+    });
   }
+
   return (
     <div className="flex flex-col items-center gap-1">
       <Switch
-        checked={enabled}
+        checked={optimisticEnabled}
         onCheckedChange={handleToggle}
-        disabled={loading}
+        disabled={isPending}
         aria-label={`Toggle ${flagKey} in ${envSlug}`}
       />
       {error && <span className="text-danger text-xs">Failed</span>}
