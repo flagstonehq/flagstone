@@ -293,7 +293,7 @@ func TestSegments_CrossTenantIsolation(t *testing.T) {
 	member := &storage.TenantMember{TenantID: tenantA.ID, UserID: userA.ID, Role: "admin"}
 	require.NoError(t, testServer.stores.Members.Add(context.Background(), member))
 
-	tokenA, err := auth.GenerateAccessToken(userA.ID, tenantA.ID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL)
+	tokenA, err := auth.GenerateAccessToken(userA.ID, tenantA.ID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL, uuid.Nil)
 	require.NoError(t, err)
 
 	projA := &storage.Project{TenantID: tenantA.ID, Slug: "proj-a", Name: "Project A"}

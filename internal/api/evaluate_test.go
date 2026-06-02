@@ -89,7 +89,7 @@ func strPtr(s string) *string { return &s }
 
 func TestEvaluateFlag_NotFound(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "apikeys", "tenant_members", "users", "tenants")
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "api_keys", "tenant_members", "users", "tenants")
 
 	_, _, _, apiKey := seedEvaluateData(t)
 
@@ -113,7 +113,7 @@ func TestEvaluateFlag_NotFound(t *testing.T) {
 
 func TestEvaluateFlag_Disabled(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "apikeys", "tenant_members", "users", "tenants")
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "api_keys", "tenant_members", "users", "tenants")
 
 	tenantID, projectID, _, apiKey := seedEvaluateData(t)
 
@@ -157,7 +157,7 @@ func TestEvaluateFlag_Disabled(t *testing.T) {
 
 func TestEvaluateFlag_RuleMatch(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "apikeys", "tenant_members", "users", "tenants")
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "api_keys", "tenant_members", "users", "tenants")
 
 	_, _, _, apiKey := seedEvaluateData(t)
 
@@ -181,7 +181,7 @@ func TestEvaluateFlag_RuleMatch(t *testing.T) {
 
 func TestEvaluateFlag_DefaultValue(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "apikeys", "tenant_members", "users", "tenants")
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "api_keys", "tenant_members", "users", "tenants")
 
 	_, _, _, apiKey := seedEvaluateData(t)
 
@@ -203,7 +203,7 @@ func TestEvaluateFlag_DefaultValue(t *testing.T) {
 
 func TestEvaluateBulk_Success(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "apikeys", "tenant_members", "users", "tenants")
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "api_keys", "tenant_members", "users", "tenants")
 
 	_, _, _, apiKey := seedEvaluateData(t)
 
@@ -337,7 +337,7 @@ func TestEvaluateFlag_RolloutDeterministic(t *testing.T) {
 
 func TestEvaluateBulk_ContextTooManyKeys(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "apikeys", "tenant_members", "users", "tenants")
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "api_keys", "tenant_members", "users", "tenants")
 
 	_, _, _, apiKey := seedEvaluateData(t)
 
@@ -358,7 +358,7 @@ func TestEvaluateBulk_ContextTooManyKeys(t *testing.T) {
 
 func TestEvaluateBulk_ContextValueTooLong(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "apikeys", "tenant_members", "users", "tenants")
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "api_keys", "tenant_members", "users", "tenants")
 
 	_, _, _, apiKey := seedEvaluateData(t)
 
@@ -375,7 +375,7 @@ func TestEvaluateBulk_ContextValueTooLong(t *testing.T) {
 
 func TestEvaluateBulk_ContextInvalidType(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "apikeys", "tenant_members", "users", "tenants")
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "api_keys", "tenant_members", "users", "tenants")
 
 	_, _, _, apiKey := seedEvaluateData(t)
 

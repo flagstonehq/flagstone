@@ -27,7 +27,7 @@ func seedUserWithRole(t *testing.T, role string) (tenantID, userID uuid.UUID, to
 	member := &storage.TenantMember{TenantID: tenant.ID, UserID: user.ID, Role: role}
 	require.NoError(t, testServer.stores.Members.Add(context.Background(), member))
 
-	accessToken, err := auth.GenerateAccessToken(user.ID, tenant.ID, role, testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL)
+	accessToken, err := auth.GenerateAccessToken(user.ID, tenant.ID, role, testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL, uuid.Nil)
 	require.NoError(t, err)
 
 	return tenant.ID, user.ID, accessToken

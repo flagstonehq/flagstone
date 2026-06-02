@@ -34,7 +34,7 @@ func seedProject(t *testing.T) (tenantID, userID, projectID uuid.UUID, projectSl
 	project := &storage.Project{TenantID: tenant.ID, Slug: "env-proj-" + uuid.New().String()[:8], Name: "Env Project"}
 	require.NoError(t, testServer.stores.Projects.Create(context.Background(), project))
 
-	accessToken, err := auth.GenerateAccessToken(user.ID, tenant.ID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL)
+	accessToken, err := auth.GenerateAccessToken(user.ID, tenant.ID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL, uuid.Nil)
 	require.NoError(t, err)
 
 	return tenant.ID, user.ID, project.ID, project.Slug, accessToken

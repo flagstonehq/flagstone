@@ -32,7 +32,7 @@ func seedAuditData(t *testing.T) (tenantID uuid.UUID, token string) {
 	member := &storage.TenantMember{TenantID: tenant.ID, UserID: user.ID, Role: "viewer"}
 	require.NoError(t, testServer.stores.Members.Add(context.Background(), member))
 
-	accessToken, err := auth.GenerateAccessToken(user.ID, tenant.ID, "viewer", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL)
+	accessToken, err := auth.GenerateAccessToken(user.ID, tenant.ID, "viewer", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL, uuid.Nil)
 	require.NoError(t, err)
 
 	return tenant.ID, accessToken
@@ -40,7 +40,7 @@ func seedAuditData(t *testing.T) (tenantID uuid.UUID, token string) {
 
 func TestAuditLog_QueryNoFilters(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "apikeys", "tenant_members", "users", "tenants")
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "api_keys", "tenant_members", "users", "tenants")
 
 	tenantID, token := seedAuditData(t)
 
@@ -70,7 +70,7 @@ func TestAuditLog_QueryNoFilters(t *testing.T) {
 
 func TestAuditLog_QueryWithFilters(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "apikeys", "tenant_members", "users", "tenants")
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "api_keys", "tenant_members", "users", "tenants")
 
 	tenantID, token := seedAuditData(t)
 	now := time.Now().UTC()
@@ -118,7 +118,7 @@ func TestAuditLog_QueryWithFilters(t *testing.T) {
 
 func TestAuditLog_Pagination(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "apikeys", "tenant_members", "users", "tenants")
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "api_keys", "tenant_members", "users", "tenants")
 
 	tenantID, token := seedAuditData(t)
 
@@ -150,7 +150,7 @@ func TestAuditLog_Pagination(t *testing.T) {
 
 func TestAuditLog_CrossTenant(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "apikeys", "tenant_members", "users", "tenants")
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "segments", "projects", "api_keys", "tenant_members", "users", "tenants")
 
 	tenantA, tokenA := seedAuditData(t)
 	tenantB, tokenB := seedAuditData(t)
@@ -201,7 +201,7 @@ func TestAuditLog_MutationsWriteEntries(t *testing.T) {
 	require.NoError(t, testServer.stores.Members.Add(context.Background(),
 		&storage.TenantMember{TenantID: tenant.ID, UserID: user.ID, Role: "admin"}))
 
-	adminToken, err := auth.GenerateAccessToken(user.ID, tenant.ID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL)
+	adminToken, err := auth.GenerateAccessToken(user.ID, tenant.ID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL, uuid.Nil)
 	require.NoError(t, err)
 
 	projBody := `{"slug":"audit-proj","name":"Audit Project"}`
