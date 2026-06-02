@@ -114,7 +114,7 @@ export function RuleCard({ rule, index, onChange, onDelete, errors }: RuleCardPr
         </Button>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-3 sm:gap-4">
         <div className="space-y-1">
           <span className="text-xs text-text-secondary">Return</span>
           <Select value={returnStr} onValueChange={setReturnValue}>

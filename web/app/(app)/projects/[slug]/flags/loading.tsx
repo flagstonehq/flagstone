@@ -5,7 +5,7 @@ export default function FlagsLoading() {
         <div className="h-5 w-16 animate-pulse rounded bg-border" />
         <div className="h-9 w-28 animate-pulse rounded bg-border" />
       </div>
-      <div className="space-y-2 p-6">
+      <div className="space-y-2 p-4 sm:p-6">
         <div className="h-10 w-full animate-pulse rounded bg-border" />
         {Array.from({ length: 5 }).map((_, i) => (
           <div

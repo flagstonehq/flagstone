@@ -141,7 +141,7 @@ export function RuleEditor({
   return (
     <div className="space-y-4">
       {/* Controls bar */}
-      <div className="flex items-center gap-4 rounded-lg border border-border bg-surface p-4">
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface p-3 sm:gap-4 sm:p-4">
         <div className="flex items-center gap-2">
           <span className="text-sm text-text-secondary">Enabled</span>
           <Switch checked={enabled} onCheckedChange={handleEnabledChange} />
