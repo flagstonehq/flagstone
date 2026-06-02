@@ -34,7 +34,7 @@ export default async function ApiKeyPage({ params }: ApiKeysPaegProps) {
         title="API Keys"
         action={<CreateKeyDialog projectSlug={slug} environments={environments} />}
       />
-      <main className="flex-1 overflow-y-auto p-6">
+      <main className="flex-1 overflow-y-auto p-4 sm:p-6">
         <ApiKeysTable apiKeys={apiKeys} environments={environments} projectSlug={slug} />
       </main>
     </div>

@@ -21,7 +21,7 @@ export default async function ProjectsPage() {
         action={<CreateProjectDialog />}
       />
 
-      <main className="flex-1 overflow-y-auto p-6">
+      <main className="flex-1 overflow-y-auto p-4 sm:p-6">
         {projects.length === 0 ? (
           <div className="flex min-h-[400px] flex-col items-center justify-center gap-4 text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary-bg">

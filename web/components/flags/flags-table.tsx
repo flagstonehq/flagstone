@@ -25,7 +25,7 @@ export function FlagsTable({ flags, environments, projectSlug }: FlagsTableProps
     );
   }
   return (
-    <div className="border-border overflow-hidden rounded-xl border">
+    <div className="overflow-x-auto rounded-xl border border-border">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-border bg-surface border-b">

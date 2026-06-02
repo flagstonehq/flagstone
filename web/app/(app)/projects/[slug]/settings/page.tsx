@@ -6,6 +6,7 @@ import { Topbar } from "@/components/layout/topbar";
 import { ProjectSettingsForm } from "@/components/settings/project-settings-form";
 import { EnvironmentsList } from "@/components/settings/environments-list";
 import { DangerZone } from "@/components/settings/danger-zone";
+import { PreferencesForm } from "@/components/settings/preferences-form";
 
 interface SettingsPageProps {
   params: Promise<{ slug: string }>;
@@ -28,7 +29,8 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
     <div className="flex h-full flex-col">
       <Topbar title="Settings" />
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-2xl space-y-10 p-6">
+        <div className="mx-auto max-w-2xl space-y-10 p-4 sm:p-6">
+          <PreferencesForm />
           <ProjectSettingsForm projectSlug={slug} name={project.name} />
           <EnvironmentsList projectSlug={slug} environments={environments} />
           <DangerZone projectSlug={slug} />

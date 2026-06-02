@@ -63,7 +63,7 @@ export default async function FlagDetailPage({ params, searchParams }: FlagDetai
           <span className="text-xs text-text-secondary font-mono">{key}</span>
         }
       />
-      <main className="flex-1 overflow-y-auto p-6">
+      <main className="flex-1 overflow-y-auto p-4 sm:p-6">
         <RuleEditor
           projectSlug={slug}
           flagKey={key}

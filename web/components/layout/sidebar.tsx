@@ -1,8 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  Menu,
+  X,
   FolderOpen,
   Flag,
   Users,
@@ -16,7 +19,6 @@ import { cn } from "@/lib/utils";
 
 function useProjectSlug(): string | null {
   const pathname = usePathname();
-  // Match /projects/:slug/...
   const match = pathname.match(/^\/projects\/([^/]+)/);
   return match?.[1] ?? null;
 }
@@ -36,11 +38,16 @@ function projectNav(slug: string) {
 }
 
 export function Sidebar() {
+  const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const projectSlug = useProjectSlug();
 
   const nav = projectSlug ? projectNav(projectSlug) : GLOBAL_NAV;
+
+  function closeMobile() {
+    setMobileOpen(false);
+  }
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -48,16 +55,31 @@ export function Sidebar() {
     router.refresh();
   }
 
-  return (
-    <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-border bg-surface">
-      <div className="flex h-14 items-center border-b border-border px-4">
-        <span className="text-lg font-bold text-primary">⚑ Flagstone</span>
+  const sidebar = (
+    <aside
+      className={cn(
+        "flex h-screen w-56 shrink-0 flex-col border-r border-border bg-surface",
+        "fixed inset-y-0 left-0 z-40 transition-transform duration-200 md:relative md:z-auto md:block",
+        mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
+      )}
+    >
+      <div className="flex h-14 items-center justify-between border-b border-border px-4">
+        <Link href="/projects" className="text-lg font-bold text-primary no-underline">⚑ Flagstone</Link>
+        <button
+          type="button"
+          onClick={closeMobile}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-hover hover:text-text md:hidden"
+          aria-label="Close sidebar"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
 
       {projectSlug && (
         <div className="px-2 pt-2">
           <Link
             href="/projects"
+            onClick={closeMobile}
             className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text"
           >
             <ChevronLeft className="h-3.5 w-3.5" />
@@ -71,6 +93,7 @@ export function Sidebar() {
           <Link
             key={href}
             href={href}
+            onClick={closeMobile}
             className={cn(
               "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
               pathname.startsWith(href)
@@ -94,5 +117,29 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
+  );
+
+  return (
+    <>
+      {/* Mobile hamburger button */}
+      <button
+        type="button"
+        onClick={() => setMobileOpen(true)}
+        className="fixed left-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface text-text shadow-sm md:hidden"
+        aria-label="Open sidebar"
+      >
+        <Menu className="h-4 w-4" />
+      </button>
+
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/30 md:hidden"
+          onClick={closeMobile}
+        />
+      )}
+
+      {sidebar}
+    </>
   );
 }

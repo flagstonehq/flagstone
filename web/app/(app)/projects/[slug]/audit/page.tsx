@@ -64,7 +64,7 @@ export default async function AuditPage({ params, searchParams }: AuditPageProps
   return (
     <div className="flex h-full flex-col">
       <Topbar title="Audit Log" />
-      <main className="flex-1 overflow-y-auto space-y-4 p-6">
+      <main className="flex-1 overflow-y-auto space-y-4 p-4 sm:p-6">
         <Suspense fallback={<div className="h-24 animate-pulse rounded-lg bg-surface" />}>
           <AuditFilters
             actorType={pickString(sp.actor_type)}
