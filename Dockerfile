@@ -8,32 +8,33 @@
 # Run:    docker run -p 8080:8080 flagstone
 # =============================================================================
 
-# --- Build stage ---
-FROM golang:1.23-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
 
 WORKDIR /src
 
-# Cache dependencies first (these change less often than source code)
 COPY go.mod go.sum* ./
 RUN go mod download
 
-# Copy source and build
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/flagstone ./cmd/flagstone
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/flagstone ./cmd/flagstone \
+ && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/seed      ./cmd/seed
 
-# --- Runtime stage ---
+ARG MIGRATE_VERSION=4.18.3
+RUN wget -qO- "https://github.com/golang-migrate/migrate/releases/download/v${MIGRATE_VERSION}/migrate.linux-amd64.tar.gz" \
+    | tar xz -C /bin/ migrate
+
 FROM alpine:3.20
 
-# Needed for HTTPS calls and timezone data
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata wget
 
-# Non-root user for security
 RUN adduser -D -u 1000 flagstone
 USER flagstone
 
 COPY --from=builder /bin/flagstone /usr/local/bin/flagstone
+COPY --from=builder /bin/seed      /usr/local/bin/seed
+COPY --from=builder /bin/migrate   /usr/local/bin/migrate
 COPY --from=builder /src/migrations /migrations
 
 EXPOSE 8080

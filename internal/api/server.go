@@ -376,7 +376,7 @@ func (s *Server) Routes() http.Handler {
 		middleware.AuthJWT(s.cfg.JWTSecret),
 		middleware.RequireRole(auth.RoleViewer),
 	)
-	mux.Handle("GET /api/v1/audit", recoverMW(auditHandler))
+	mux.Handle("GET /api/v1/projects/{slug}/audit", recoverMW(auditHandler))
 
 	evaluateSingleHandler := s.withMiddleware(
 		http.HandlerFunc(s.handleEvaluateFlag),
