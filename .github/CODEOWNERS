@@ -1,0 +1,4 @@
+# Every PR touching these paths requires a review from a code owner.
+# With branch protection "Require review from Code Owners" enabled, this
+# means no external change can be merged without your approval.
+* @thomas-vilte
