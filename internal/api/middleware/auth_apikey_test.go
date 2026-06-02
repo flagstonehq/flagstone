@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thomas-vilte/flagstone/internal/auth"
-	"github.com/thomas-vilte/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/storage"
 )
 
 func TestAuthAPIKey_missingHeader(t *testing.T) {

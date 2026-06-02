@@ -15,7 +15,7 @@ A full inventory of the repository surfaced these facts, which dictate the order
 - **SSE is designed in `DESIGN.md`** (lines 1029-1387) but never implemented: `internal/streaming/` is an empty directory with a `.gitkeep`.
 - **There is no seed data**: `admin@acme.com` / `password123` are referenced in 8 Playwright specs and in `setup_test.go`, but **they are never provisioned anywhere**. The only bootstrap path is `POST /api/v1/setup` with arbitrary data.
 - **`docker-compose.yml` only starts Postgres and Redis**. A developer must run `make run` and `npm run dev` in two separate terminals.
-- **The Go SDK example in the README does not compile**: it imports `github.com/thomas-vilte/flagstone/pkg/sdk`, which is an empty directory.
+- **The Go SDK example in the README does not compile**: it imports `github.com/flagstonehq/flagstone/pkg/sdk`, which is an empty directory.
 - **`flag_environments.version` already exists** with an auto-increment trigger at `migrations/000001_init.up.sql:338-347`. Optimistic concurrency control is already wired; SSE will simply expose it.
 - **DESIGN.md does not specify a `segment_change` event**, but the SDK needs one to invalidate cached segments when their rules change. We extend the design with justification.
 
@@ -115,7 +115,7 @@ open http://localhost:3002
 Replace the existing "Local Development" section with:
 
 ```bash
-git clone https://github.com/thomas-vilte/flagstone
+git clone https://github.com/flagstonehq/flagstone
 cd flagstone
 docker compose up -d && docker compose --profile seed up seed
 open http://localhost:3002
@@ -350,7 +350,7 @@ Serves as a usage manual and a manual smoke test.
 Replace the broken example in `README.md:277-311` with:
 
 ```go
-import "github.com/thomas-vilte/flagstone/pkg/sdk"
+import "github.com/flagstonehq/flagstone/pkg/sdk"
 
 client, _ := sdk.New(sdk.Options{
     Endpoint: "https://api.flagstone.dev",

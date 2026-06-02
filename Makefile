@@ -5,7 +5,7 @@
 
 BINARY := bin/flagstone
 SEED_BINARY := bin/seed
-MODULE := github.com/thomas-vilte/flagstone
+MODULE := github.com/flagstonehq/flagstone
 
 DATABASE_URL ?= postgres://flagstone:flagstone_dev@localhost:5432/flagstone?sslmode=disable
 

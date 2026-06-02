@@ -1,4 +1,4 @@
-module github.com/thomas-vilte/flagstone
+module github.com/flagstonehq/flagstone
 
 go 1.26.2
 

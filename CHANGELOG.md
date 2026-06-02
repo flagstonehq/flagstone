@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 
 ## [v0.2.0] - 2026-06-02
 
-[v0.2.0]: https://github.com/thomas-vilte/flagstone/compare/v0.1.0...v0.2.0
+[v0.2.0]: https://github.com/flagstonehq/flagstone/compare/v0.1.0...v0.2.0
 
 In this release, we focused on expanding the core management capabilities of Flagstone by introducing user segments and more granular API controls. We also prioritized user experience with a fully responsive interface, dark mode support, and enhanced security through rate limiting.
 
@@ -34,7 +34,7 @@ In this release, we focused on expanding the core management capabilities of Fla
 
 ## [v0.1.0] - 2026-06-01
 
-[v0.1.0]: https://github.com/thomas-vilte/flagstone/compare/v0.0.0...v0.1.0
+[v0.1.0]: https://github.com/flagstonehq/flagstone/compare/v0.0.0...v0.1.0
 
 We are proud to introduce the initial release of Flagstone, a powerful feature management platform. We have focused on building a secure, multi-tenant foundation that includes robust flag evaluation, comprehensive security features, and a modern user interface to help you control your software delivery.
 

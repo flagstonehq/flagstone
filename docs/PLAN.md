@@ -242,7 +242,7 @@ require (
 #### `cmd/flagstone/main.go` — cambios
 
 **Que cambia**:
-1. Importar `"github.com/thomas-vilte/flagstone/internal/config"`
+1. Importar `"github.com/flagstonehq/flagstone/internal/config"`
 2. Eliminar funcion `envOr` duplicada (ya existe en `config`)
 3. Llamar `config.Load()` al inicio — si falla, `logger.Fatal`
 4. Inicializar pool de Postgres con retry (5 intentos, backoff exponencial, como DESIGN.md)

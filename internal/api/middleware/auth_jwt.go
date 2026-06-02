@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/thomas-vilte/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/auth"
 )
 
 // AuthJWT validates a Bearer JWT access token and injects the claims into the

@@ -217,8 +217,8 @@ Why Flagstone?
 - MIT license, no vendor lock-in
 - Same codebase: self-hosted (free) + managed SaaS ($79/mo)
 
-GitHub: https://github.com/thomas-vilte/flagstone
-Docs: https://github.com/thomas-vilte/flagstone/tree/main/docs
+GitHub: https://github.com/flagstonehq/flagstone
+Docs: https://github.com/flagstonehq/flagstone/tree/main/docs
 Discord: https://discord.gg/...
 
 Ask me anything about the architecture, design decisions, or roadmap.
@@ -236,7 +236,7 @@ Native OpenTelemetry.
 Self-hosted: free (MIT)
 Cloud: $79/month
 
-github.com/thomas-vilte/flagstone
+github.com/flagstonehq/flagstone
 
 Launching on Show HN now 👇
 ```
@@ -804,7 +804,7 @@ El README es lo primero que ve la gente. Debe:
 > Feature flags, simplified. One binary. Postgres. Done.
 > Native OpenTelemetry. Zero vendor lock-in.
 
-[![GitHub Stars](https://img.shields.io/github/stars/thomas-vilte/flagstone)](...)
+[![GitHub Stars](https://img.shields.io/github/stars/flagstonehq/flagstone)](...)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Discord](https://img.shields.io/badge/discord-join-blue)](https://discord.gg/...)
 
@@ -820,7 +820,7 @@ El README es lo primero que ve la gente. Debe:
 
 ```bash
 # Clone
-git clone https://github.com/thomas-vilte/flagstone
+git clone https://github.com/flagstonehq/flagstone
 cd flagstone
 
 # Deploy (local)
@@ -885,7 +885,7 @@ open http://localhost:3000
 ## Community
 
 - [Discord](https://discord.gg/...) – 🔥 Join us!
-- [GitHub Discussions](https://github.com/thomas-vilte/flagstone/discussions)
+- [GitHub Discussions](https://github.com/flagstonehq/flagstone/discussions)
 - [Twitter](https://twitter.com/flagstone_dev)
 
 ## Roadmap

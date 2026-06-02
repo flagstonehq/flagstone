@@ -12,9 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thomas-vilte/flagstone/internal/api/middleware"
-	"github.com/thomas-vilte/flagstone/internal/auth"
-	"github.com/thomas-vilte/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/internal/api/middleware"
+	"github.com/flagstonehq/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/storage"
 )
 
 func seedAuthUser(t *testing.T) (tenantID, userID uuid.UUID, password string) {

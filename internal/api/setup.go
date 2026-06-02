@@ -14,8 +14,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/thomas-vilte/flagstone/internal/api/middleware"
-	"github.com/thomas-vilte/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/api/middleware"
+	"github.com/flagstonehq/flagstone/internal/auth"
 	"go.uber.org/zap"
 )
 

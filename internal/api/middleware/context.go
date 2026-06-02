@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/thomas-vilte/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/auth"
 	"go.uber.org/zap"
 )
 

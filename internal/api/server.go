@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/thomas-vilte/flagstone/internal/api/middleware"
-	"github.com/thomas-vilte/flagstone/internal/auth"
-	"github.com/thomas-vilte/flagstone/internal/config"
-	"github.com/thomas-vilte/flagstone/pkg/engine"
-	"github.com/thomas-vilte/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/internal/api/middleware"
+	"github.com/flagstonehq/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/config"
+	"github.com/flagstonehq/flagstone/pkg/engine"
+	"github.com/flagstonehq/flagstone/internal/storage"
 	"go.uber.org/zap"
 )
 

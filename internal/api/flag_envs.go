@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/thomas-vilte/flagstone/internal/api/middleware"
-	"github.com/thomas-vilte/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/internal/api/middleware"
+	"github.com/flagstonehq/flagstone/internal/storage"
 	"go.uber.org/zap"
 )
 
