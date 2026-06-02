@@ -14,11 +14,12 @@ const issuer = "flagstone"
 type Claims struct {
 	TenantID string `json:"tid"`
 	Role     string `json:"role"`
+	SID      string `json:"sid,omitempty"`
 	jwt.RegisteredClaims
 }
 
 // NewClaims creates a new Claims instance with the provided values.
-func NewClaims(userID, tenantID uuid.UUID, role string, now time.Time, ttl time.Duration) (*Claims, error) {
+func NewClaims(userID, tenantID uuid.UUID, role string, now time.Time, ttl time.Duration, sessionID uuid.UUID) (*Claims, error) {
 	if userID == uuid.Nil {
 		return nil, fmt.Errorf("auth: user id is required")
 	}
@@ -34,7 +35,7 @@ func NewClaims(userID, tenantID uuid.UUID, role string, now time.Time, ttl time.
 
 	now = now.UTC()
 
-	return &Claims{
+	c := &Claims{
 		TenantID: tenantID.String(),
 		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -44,7 +45,11 @@ func NewClaims(userID, tenantID uuid.UUID, role string, now time.Time, ttl time.
 			NotBefore: jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		},
-	}, nil
+	}
+	if sessionID != uuid.Nil {
+		c.SID = sessionID.String()
+	}
+	return c, nil
 }
 
 // UserID parses and returns the subject claim as a uuid.UUID.
@@ -55,6 +60,19 @@ func (c *Claims) UserID() (uuid.UUID, error) {
 	id, err := uuid.Parse(c.Subject)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("auth: invalid subject uuid: %w", err)
+	}
+	return id, nil
+}
+
+// SessionID parses and returns the session id claim as a uuid.UUID.
+// Returns uuid.Nil if no session ID is set.
+func (c *Claims) SessionID() (uuid.UUID, error) {
+	if c == nil || c.SID == "" {
+		return uuid.Nil, nil
+	}
+	id, err := uuid.Parse(c.SID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("auth: invalid session uuid: %w", err)
 	}
 	return id, nil
 }

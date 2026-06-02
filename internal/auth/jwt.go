@@ -13,7 +13,7 @@ import (
 var ErrInvalidToken = errors.New("auth: invalid token")
 
 // GenerateAccessToken creates a signed JWT access token for the given user and tenant.
-func GenerateAccessToken(userID, tenantID uuid.UUID, role, secret string, ttl time.Duration) (string, error) {
+func GenerateAccessToken(userID, tenantID uuid.UUID, role, secret string, ttl time.Duration, sessionID uuid.UUID) (string, error) {
 	if len(secret) < 32 {
 		return "", fmt.Errorf("auth: jwt secret must be at least 32 characters")
 	}
@@ -21,7 +21,7 @@ func GenerateAccessToken(userID, tenantID uuid.UUID, role, secret string, ttl ti
 		return "", fmt.Errorf("auth: invalid role %q", role)
 	}
 
-	claims, err := NewClaims(userID, tenantID, role, time.Now(), ttl)
+	claims, err := NewClaims(userID, tenantID, role, time.Now(), ttl, sessionID)
 	if err != nil {
 		return "", err
 	}

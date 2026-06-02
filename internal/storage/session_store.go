@@ -61,6 +61,82 @@ func (s *SessionStore) Create(ctx context.Context, session *Session) error {
 	return nil
 }
 
+// GetByID retrieves a session by its ID.
+// Returns ErrNotFound if the session does not exist.
+func (s *SessionStore) GetByID(ctx context.Context, id uuid.UUID) (*Session, error) {
+	const query = `
+		SELECT id, user_id, tenant_id, refresh_hash, user_agent, host(ip_address), expires_at, created_at
+		FROM sessions
+		WHERE id = $1
+	`
+	var (
+		session   Session
+		userAgent sql.NullString
+		ipText    sql.NullString
+	)
+	if err := s.db.QueryRow(ctx, query, id).Scan(
+		&session.ID,
+		&session.UserID,
+		&session.TenantID,
+		&session.RefreshHash,
+		&userAgent,
+		&ipText,
+		&session.ExpiresAt,
+		&session.CreatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("storage.SessionStore.GetByID: %w", err)
+	}
+	session.UserAgent = stringPtrFromNull(userAgent)
+	session.IPAddress = ipPtrFromNull(ipText)
+	return &session, nil
+}
+
+// ListByUserID returns all non-expired sessions for a user, newest first.
+func (s *SessionStore) ListByUserID(ctx context.Context, userID uuid.UUID) ([]*Session, error) {
+	const query = `
+		SELECT id, user_id, tenant_id, refresh_hash, user_agent, host(ip_address), expires_at, created_at
+		FROM sessions
+		WHERE user_id = $1 AND expires_at > NOW()
+		ORDER BY created_at DESC
+	`
+	rows, err := s.db.Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("storage.SessionStore.ListByUserID: %w", err)
+	}
+	defer rows.Close()
+
+	sessions := make([]*Session, 0)
+	for rows.Next() {
+		var (
+			session   Session
+			userAgent sql.NullString
+			ipText    sql.NullString
+		)
+		if err := rows.Scan(
+			&session.ID,
+			&session.UserID,
+			&session.TenantID,
+			&session.RefreshHash,
+			&userAgent,
+			&ipText,
+			&session.ExpiresAt,
+			&session.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("storage.SessionStore.ListByUserID: scan: %w", err)
+		}
+		session.UserAgent = stringPtrFromNull(userAgent)
+		session.IPAddress = ipPtrFromNull(ipText)
+		sessions = append(sessions, &session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage.SessionStore.ListByUserID: rows: %w", err)
+	}
+	return sessions, nil
+}
+
 // GetByRefreshHash retrieves a session by its refresh token hash.
 // Returns ErrNotFound if the session does not exist.
 func (s *SessionStore) GetByRefreshHash(ctx context.Context, refreshHash string) (*Session, error) {
