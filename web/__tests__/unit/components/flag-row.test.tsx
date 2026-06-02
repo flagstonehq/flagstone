@@ -23,7 +23,7 @@ describe("FlagRow", () => {
     render(
       <table>
         <tbody>
-          <FlagRow flag={flag} environments={envs} projectSlug="my-app" />
+          <FlagRow flag={flag} environments={envs} projectSlug="my-app" enabledMap={{}} />
         </tbody>
       </table>,
     );
@@ -35,7 +35,7 @@ describe("FlagRow", () => {
     render(
       <table>
         <tbody>
-          <FlagRow flag={flag} environments={envs} projectSlug="my-app" />
+          <FlagRow flag={flag} environments={envs} projectSlug="my-app" enabledMap={{}} />
         </tbody>
       </table>,
     );

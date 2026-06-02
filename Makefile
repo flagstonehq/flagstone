@@ -1,7 +1,7 @@
 # =============================================================================
 # Flagstone
 # =============================================================================
-.PHONY: help build run test test-int test-int-v test-cover lint fmt migrate migrate-down setup clean docker-build docker-run
+.PHONY: help build run test test-int test-int-v test-cover lint fmt migrate migrate-down migrate-create setup seed clean docker-build docker-run
 
 BINARY := bin/flagstone
 MODULE := github.com/thomas-vilte/flagstone
@@ -83,6 +83,9 @@ setup:
 
 down:
 	docker compose down
+
+seed: ## Populate dev database with demo data (server must be running on :8080)
+	@bash scripts/seed.sh
 
 clean:
 	docker compose down -v

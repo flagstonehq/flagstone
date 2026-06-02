@@ -14,7 +14,6 @@ import {
   Settings,
   User,
   LogOut,
-  ChevronLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -77,18 +76,6 @@ export function Sidebar() {
         </button>
       </div>
 
-      {projectSlug && (
-        <div className="px-2 pt-2">
-          <Link
-            href="/projects"
-            onClick={closeMobile}
-            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-            All projects
-          </Link>
-        </div>
-      )}
 
       <nav className="flex-1 space-y-0.5 p-2">
         {nav.map(({ href, label, icon: Icon }) => (

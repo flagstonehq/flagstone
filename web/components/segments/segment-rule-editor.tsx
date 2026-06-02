@@ -16,7 +16,7 @@ interface SegmentRuleEditorProps {
 }
 
 function isLeaf(c: unknown): c is LeafCondition {
-  return typeof c === "object" && c !== null && "attribute" in c && "operator" in c;
+  return typeof c === "object" && c !== null && "attribute" in c && "op" in c;
 }
 
 function extractConditions(rules: RuleConditionNode): LeafCondition[] {
@@ -51,7 +51,7 @@ export function SegmentRuleEditor({ projectSlug, segmentKey, initialRules, segme
   }
 
   function addCondition() {
-    setConditions([...conditions, { attribute: "", operator: "eq" as const, value: "" }]);
+    setConditions([...conditions, { attribute: "", op: "eq" as const, value: "" }]);
     markDirty();
   }
 
@@ -61,7 +61,7 @@ export function SegmentRuleEditor({ projectSlug, segmentKey, initialRules, segme
   }
 
   function buildRulesNode(): RuleConditionNode {
-    if (conditions.length === 0) return { attribute: "", operator: "eq" as const, value: "" };
+    if (conditions.length === 0) return { attribute: "", op: "eq" as const, value: "" };
     if (conditions.length === 1) return conditions[0];
     return { all: conditions };
   }

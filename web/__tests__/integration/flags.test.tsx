@@ -19,8 +19,12 @@ afterEach(() => {
   server.resetHandlers();
 });
 describe("EnvToggle", () => {
-  it("calls API and refreshes on toggle", async () => {
-    vi.spyOn(global, "fetch").mockResolvedValueOnce(new Response(null, { status: 204 }));
+  it("calls API and stays enabled on successful toggle", async () => {
+    server.use(
+      http.patch(`${API_BASE}/api/v1/projects/:slug/flags/:key/environments/:env`, () =>
+        new HttpResponse(null, { status: 204 }),
+      ),
+    );
     const user = userEvent.setup();
     render(
       <EnvToggle
@@ -32,7 +36,7 @@ describe("EnvToggle", () => {
     );
     const sw = screen.getByRole("switch");
     await user.click(sw);
-    await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+    await waitFor(() => expect(sw).toBeChecked());
   });
   it("reverts and shows error if API fails", async () => {
     server.use(

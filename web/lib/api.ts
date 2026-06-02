@@ -225,6 +225,12 @@ export function revokeApiKey(projectSlug: string, envId: string, keyId: string) 
     method: "DELETE",
   });
 }
+export function getFlagStates(projectSlug: string, envSlug: string) {
+  return apiFetch<{ flagKey: string; enabled: boolean }[]>(
+    `/api/v1/projects/${projectSlug}/environments/${envSlug}/flag-states`,
+  );
+}
+
 export function getFlag(projectSlug: string, flagKey: string) {
   return apiFetch<import("./types").Flag>(
     `/api/v1/projects/${projectSlug}/flags/${flagKey}`,

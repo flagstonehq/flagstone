@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
-import { serverFetch } from "@/lib/api";
+import { serverFetch, ApiError } from "@/lib/api";
 import type { Flag, Environment, FlagEnvironmentConfig } from "@/lib/types";
 import { RuleEditor } from "@/components/rules/rule-editor";
 import { Topbar } from "@/components/layout/topbar";
@@ -18,23 +18,30 @@ export default async function FlagDetailPage({ params, searchParams }: FlagDetai
   const token = cookieStore.get("access_token")?.value;
   if (!token) redirect("/login");
 
-  const flags = await serverFetch<Flag[]>(
-    `/api/v1/projects/${slug}/flags`,
-    token,
-  );
+  let flag: Flag;
+  try {
+    flag = await serverFetch<Flag>(`/api/v1/projects/${slug}/flags/${key}`, token);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) redirect("/login");
+    if (err instanceof ApiError && err.status === 404) notFound();
+    throw err;
+  }
 
-  const flag = flags.find((f) => f.key === key);
-  if (!flag) notFound();
-
-  const environments = await serverFetch<Environment[]>(
-    `/api/v1/projects/${slug}/environments`,
-    token,
-  );
+  let environments: Environment[] = [];
+  try {
+    environments = await serverFetch<Environment[]>(
+      `/api/v1/projects/${slug}/environments`,
+      token,
+    );
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) redirect("/login");
+    throw err;
+  }
 
   const envSlug = (Array.isArray(sp.env) ? sp.env[0] : sp.env) ?? environments[0]?.slug;
   const targetEnv = environments.find((e) => e.slug === envSlug);
 
-  let envConfig;
+  let envConfig: FlagEnvironmentConfig | undefined;
   if (targetEnv) {
     try {
       envConfig = await serverFetch<FlagEnvironmentConfig>(
@@ -59,6 +66,8 @@ export default async function FlagDetailPage({ params, searchParams }: FlagDetai
     <div className="flex h-full flex-col">
       <Topbar
         title={flag.name}
+        backHref={`/projects/${slug}/flags`}
+        backLabel="Flags"
         action={
           <span className="text-xs text-text-secondary font-mono">{key}</span>
         }
@@ -72,7 +81,7 @@ export default async function FlagDetailPage({ params, searchParams }: FlagDetai
           initialEnabled={envConfig?.enabled ?? false}
           initialVersion={envConfig?.version ?? 0}
           environments={environments}
-          currentEnvSlug={envSlug}
+          currentEnvSlug={envSlug ?? ""}
         />
       </main>
     </div>

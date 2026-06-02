@@ -78,7 +78,7 @@ export const createEnvironmentSchema = z.object({
 
 const leafConditionSchema = z.object({
   attribute: z.string().min(1, "Attribute is required"),
-  operator: z.enum([
+  op: z.enum([
     "eq", "neq", "gt", "gte", "lt", "lte",
     "in", "not_in", "contains", "starts_with", "ends_with", "matches",
     "exists", "not_exists", "segment",

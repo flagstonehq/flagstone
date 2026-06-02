@@ -104,6 +104,91 @@ func (s *Server) handleGetFlagEnvironment(w http.ResponseWriter, r *http.Request
 	middleware.JSON(w, http.StatusOK, flagEnvResponseFromConfig(cfg))
 }
 
+// handleToggleFlagEnvironment handles PATCH — only changes enabled state,
+// no OCC required (last-write-wins is fine for a simple on/off toggle).
+func (s *Server) handleToggleFlagEnvironment(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := DecodeJSON(r, &req); err != nil {
+		s.writeDecodeError(w, r, err)
+		return
+	}
+
+	claims := middleware.ClaimsFromContext(r.Context())
+	tenantID, err := claims.TenantUUID()
+	if err != nil {
+		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid token claims.")
+		return
+	}
+	userID, err := claims.UserID()
+	if err != nil {
+		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid token claims.")
+		return
+	}
+
+	projectSlug := r.PathValue("slug")
+	flagKey := r.PathValue("key")
+	envSlug := r.PathValue("envSlug")
+
+	project, err := s.stores.Projects.GetBySlug(r.Context(), tenantID, projectSlug)
+	if err != nil {
+		if errors.Is(err, storage.ErrProjectNotFound) {
+			middleware.Error(w, r, http.StatusNotFound, "NOT_FOUND", "Project not found.")
+			return
+		}
+		s.logger.Error("toggle flag env: get project", zap.Error(err))
+		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		return
+	}
+
+	flag, err := s.stores.Flags.GetByKey(r.Context(), project.ID, flagKey)
+	if err != nil {
+		if errors.Is(err, storage.ErrFlagNotFound) {
+			middleware.Error(w, r, http.StatusNotFound, "NOT_FOUND", "Flag not found.")
+			return
+		}
+		s.logger.Error("toggle flag env: get flag", zap.Error(err))
+		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		return
+	}
+
+	env, err := s.stores.Environments.GetBySlug(r.Context(), project.ID, envSlug)
+	if err != nil {
+		if errors.Is(err, storage.ErrEnvironmentNotFound) {
+			middleware.Error(w, r, http.StatusNotFound, "NOT_FOUND", "Environment not found.")
+			return
+		}
+		s.logger.Error("toggle flag env: get env", zap.Error(err))
+		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		return
+	}
+
+	if err := s.stores.FlagEnvironments.SetEnabled(r.Context(), flag.ID, env.ID, req.Enabled); err != nil {
+		s.logger.Error("toggle flag env", zap.Error(err))
+		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		return
+	}
+
+	action := "flag_environment.enabled"
+	if !req.Enabled {
+		action = "flag_environment.disabled"
+	}
+	if auditErr := s.stores.AuditLogs.Insert(r.Context(), &storage.AuditLogEntry{
+		TenantID:     tenantID,
+		ActorID:      uuidPtr(userID),
+		ActorType:    "user",
+		Action:       action,
+		ResourceType: "flag_environment",
+		IPAddress:    requestIP(r),
+		UserAgent:    stringPtr(strings.TrimSpace(r.UserAgent())),
+	}); auditErr != nil {
+		s.logger.Error("toggle flag env: audit log", zap.Error(auditErr))
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleUpdateFlagEnvironment(w http.ResponseWriter, r *http.Request) {
 	var req updateFlagEnvRequest
 	if err := DecodeJSON(r, &req); err != nil {

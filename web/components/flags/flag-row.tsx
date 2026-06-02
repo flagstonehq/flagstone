@@ -15,9 +15,10 @@ interface FlagRowProps {
   flag: Flag;
   environments: Environment[];
   projectSlug: string;
+  enabledMap: Record<string, Record<string, boolean>>;
 }
 
-export function FlagRow({ flag, environments, projectSlug }: FlagRowProps) {
+export function FlagRow({ flag, environments, projectSlug, enabledMap }: FlagRowProps) {
   const firstEnv = environments[0]?.slug;
   return (
     <tr className="hover:bg-hover transition-colors">
@@ -43,6 +44,7 @@ export function FlagRow({ flag, environments, projectSlug }: FlagRowProps) {
             projectSlug={projectSlug}
             flagKey={flag.key}
             envSlug={env.slug}
+            defaultEnabled={enabledMap[env.slug]?.[flag.key] ?? false}
           />
         </td>
       ))}

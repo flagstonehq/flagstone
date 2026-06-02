@@ -18,7 +18,7 @@ interface RuleCardProps {
 }
 
 function isLeaf(c: unknown): c is LeafCondition {
-  return typeof c === "object" && c !== null && "attribute" in c && "operator" in c;
+  return typeof c === "object" && c !== null && "attribute" in c && "op" in c;
 }
 
 function extractConditions(rule: Rule): LeafCondition[] {
@@ -42,7 +42,7 @@ export function RuleCard({ rule, index, onChange, onDelete, errors }: RuleCardPr
     if (leaves.length === 0) {
       onChange({
         ...rule,
-        conditions: { attribute: "", operator: "eq" as const, value: "" },
+        conditions: { attribute: "", op: "eq" as const, value: "" },
       });
     } else if (leaves.length === 1) {
       onChange({ ...rule, conditions: leaves[0] });
@@ -58,7 +58,7 @@ export function RuleCard({ rule, index, onChange, onDelete, errors }: RuleCardPr
   }
 
   function addCondition() {
-    setConditions([...conditions, { attribute: "", operator: "eq" as const, value: "" }]);
+    setConditions([...conditions, { attribute: "", op: "eq" as const, value: "" }]);
   }
 
   function deleteCondition(i: number) {

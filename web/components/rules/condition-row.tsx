@@ -35,9 +35,9 @@ export function ConditionRow({ condition, onChange, onDelete }: ConditionRowProp
       <div className="w-28 space-y-1">
         <Label className="text-xs text-text-secondary">Op</Label>
         <Select
-          value={condition.operator}
+          value={condition.op}
           onValueChange={(v: string | null) =>
-            onChange({ ...condition, operator: (v ?? "eq") as LeafCondition["operator"] })
+            onChange({ ...condition, op: (v ?? "eq") as LeafCondition["op"] })
           }
         >
           <SelectTrigger aria-label="Operator">

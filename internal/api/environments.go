@@ -208,6 +208,60 @@ func (s *Server) handleDeleteEnvironment(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+type flagStateItem struct {
+	FlagKey string `json:"flag_key"`
+	Enabled bool   `json:"enabled"`
+}
+
+// handleListFlagStates returns the enabled state of every active flag in a
+// given environment. Used by the dashboard flags table to initialise toggles.
+func (s *Server) handleListFlagStates(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.ClaimsFromContext(r.Context())
+	tenantID, err := claims.TenantUUID()
+	if err != nil {
+		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid token claims.")
+		return
+	}
+
+	projectSlug := r.PathValue("slug")
+	envSlug := r.PathValue("envSlug")
+
+	project, err := s.stores.Projects.GetBySlug(r.Context(), tenantID, projectSlug)
+	if err != nil {
+		if errors.Is(err, storage.ErrProjectNotFound) {
+			middleware.Error(w, r, http.StatusNotFound, "NOT_FOUND", "Project not found.")
+			return
+		}
+		s.logger.Error("flag states: get project", zap.Error(err))
+		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		return
+	}
+
+	env, err := s.stores.Environments.GetBySlug(r.Context(), project.ID, envSlug)
+	if err != nil {
+		if errors.Is(err, storage.ErrEnvironmentNotFound) {
+			middleware.Error(w, r, http.StatusNotFound, "NOT_FOUND", "Environment not found.")
+			return
+		}
+		s.logger.Error("flag states: get env", zap.Error(err))
+		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		return
+	}
+
+	configs, err := s.stores.FlagEnvironments.ListByEnvironment(r.Context(), env.ID)
+	if err != nil {
+		s.logger.Error("flag states: list", zap.Error(err))
+		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		return
+	}
+
+	resp := make([]flagStateItem, 0, len(configs))
+	for _, c := range configs {
+		resp = append(resp, flagStateItem{FlagKey: c.FlagKey, Enabled: c.Enabled})
+	}
+	middleware.JSON(w, http.StatusOK, resp)
+}
+
 func validateCreateEnvironment(req *createEnvironmentRequest) error {
 	req.Slug = strings.TrimSpace(req.Slug)
 	req.Name = strings.TrimSpace(req.Name)

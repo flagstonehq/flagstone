@@ -15,7 +15,7 @@ const environments: Environment[] = [
 ];
 
 const initialRule: Rule = {
-  conditions: { attribute: "country", operator: "eq", value: "AR" },
+  conditions: { attribute: "country", op: "eq", value: "AR" },
   value: null,
 };
 
@@ -42,7 +42,7 @@ describe("RuleEditor", () => {
     render(
       <RuleEditor
         {...editorProps({
-          initialRules: [initialRule, { ...initialRule, conditions: { attribute: "browser", operator: "eq", value: "Chrome" }, value: true }],
+          initialRules: [initialRule, { ...initialRule, conditions: { attribute: "browser", op: "eq", value: "Chrome" }, value: true }],
         })}
       />,
     );
@@ -135,7 +135,7 @@ describe("RuleEditor", () => {
         {...editorProps({
           initialRules: [
             initialRule,
-            { conditions: { attribute: "browser", operator: "eq", value: "Chrome" }, value: true },
+            { conditions: { attribute: "browser", op: "eq", value: "Chrome" }, value: true },
           ],
         })}
       />,

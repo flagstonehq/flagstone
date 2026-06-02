@@ -6,9 +6,10 @@ interface FlagsTableProps {
   flags: Flag[];
   environments: Environment[];
   projectSlug: string;
+  enabledMap: Record<string, Record<string, boolean>>;
 }
 
-export function FlagsTable({ flags, environments, projectSlug }: FlagsTableProps) {
+export function FlagsTable({ flags, environments, projectSlug, enabledMap }: FlagsTableProps) {
   if (flags.length === 0) {
     return (
       <div className="flex min-h-[400px] flex-col items-center justify-center gap-4 text-center">
@@ -48,6 +49,7 @@ export function FlagsTable({ flags, environments, projectSlug }: FlagsTableProps
               flag={flag}
               environments={environments}
               projectSlug={projectSlug}
+              enabledMap={enabledMap}
             />
           ))}
         </tbody>

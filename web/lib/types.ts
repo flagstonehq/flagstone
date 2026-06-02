@@ -33,7 +33,8 @@ export type Flag = {
 };
 export type LeafCondition = {
   attribute: string;
-  operator:
+  // Field name must match the Go backend's JSON key: "op" (not "operator").
+  op:
     | "eq" | "neq"
     | "gt" | "gte" | "lt" | "lte"
     | "in" | "not_in"

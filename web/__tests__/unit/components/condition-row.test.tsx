@@ -7,7 +7,7 @@ import type { LeafCondition } from "@/lib/types";
 function leaf(overrides: Partial<LeafCondition> = {}): LeafCondition {
   return {
     attribute: "country",
-    operator: "eq",
+    op: "eq",
     value: "AR",
     ...overrides,
   };

@@ -132,6 +132,22 @@ func (s *FlagEnvironmentStore) UpdateWithVersion(ctx context.Context, cfg *FlagE
 	return nil
 }
 
+// SetEnabled updates only the enabled state of a flag environment.
+// No OCC — last write wins, which is fine for a simple toggle.
+func (s *FlagEnvironmentStore) SetEnabled(ctx context.Context, flagID, environmentID uuid.UUID, enabled bool) error {
+	const query = `
+		UPDATE flag_environments
+		SET enabled = $3
+		WHERE flag_id = $1
+		  AND environment_id = $2
+	`
+	_, err := s.db.Exec(ctx, query, flagID, environmentID, enabled)
+	if err != nil {
+		return fmt.Errorf("storage.FlagEnvironmentStore.SetEnabled: %w", err)
+	}
+	return nil
+}
+
 // ListByEnvironment returns the flattened active flag configuration for an environment.
 func (s *FlagEnvironmentStore) ListByEnvironment(ctx context.Context, environmentID uuid.UUID) ([]FlagEnvironmentConfig, error) {
 	const query = `

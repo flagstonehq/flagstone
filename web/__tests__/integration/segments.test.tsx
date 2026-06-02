@@ -20,7 +20,7 @@ const segments: Segment[] = [
     key: "beta-users",
     name: "Beta Users",
     description: "Users enrolled in the beta program",
-    rules: { attribute: "plan", operator: "eq", value: "beta" } as RuleConditionNode,
+    rules: { attribute: "plan", op: "eq", value: "beta" } as RuleConditionNode,
     archivedAt: null,
     createdAt: new Date(Date.now() - 604800000).toISOString(),
     updatedAt: new Date().toISOString(),
@@ -31,7 +31,7 @@ const segments: Segment[] = [
     key: "premium-customers",
     name: "Premium Customers",
     description: null,
-    rules: { attribute: "plan", operator: "eq", value: "premium" } as RuleConditionNode,
+    rules: { attribute: "plan", op: "eq", value: "premium" } as RuleConditionNode,
     archivedAt: null,
     createdAt: new Date(Date.now() - 259200000).toISOString(),
     updatedAt: new Date().toISOString(),
@@ -117,7 +117,7 @@ describe("SegmentRuleEditor", () => {
   it("renders conditions from initial rules", () => {
     const rules: RuleConditionNode = {
       attribute: "plan",
-      operator: "eq",
+      op: "eq",
       value: "beta",
     } as LeafCondition;
     render(
@@ -138,7 +138,7 @@ describe("SegmentRuleEditor", () => {
       <SegmentRuleEditor
         projectSlug="my-app"
         segmentKey="beta-users"
-        initialRules={{ attribute: "country", operator: "eq", value: "AR" } as LeafCondition}
+        initialRules={{ attribute: "country", op: "eq", value: "AR" } as LeafCondition}
         segmentName="Beta Users"
       />,
     );
@@ -151,7 +151,7 @@ describe("SegmentRuleEditor", () => {
     vi.spyOn(global, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
-          segment: { id: "s1", key: "beta-users", rules: { attribute: "plan", operator: "eq", value: "beta" } },
+          segment: { id: "s1", key: "beta-users", rules: { attribute: "plan", op: "eq", value: "beta" } },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
@@ -159,7 +159,7 @@ describe("SegmentRuleEditor", () => {
     const user = userEvent.setup();
     const rules: RuleConditionNode = {
       attribute: "plan",
-      operator: "eq",
+      op: "eq",
       value: "beta",
     } as LeafCondition;
     render(

@@ -30,6 +30,15 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/projects", request.url));
   }
 
+  // Inject the access token as a Bearer header so the Go backend
+  // receives it even on client-initiated requests (which only carry the
+  // httpOnly cookie, not an Authorization header).
+  if (token && pathname.startsWith("/api/v1/")) {
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("Authorization", `Bearer ${token}`);
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
   return NextResponse.next();
 }
 

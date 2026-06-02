@@ -446,8 +446,21 @@ func validateCreateFlag(req *createFlagRequest) error {
 		return fmt.Errorf("type must be one of: boolean, string, number, json")
 	}
 
-	if len(req.DefaultValue) > 0 && !json.Valid(req.DefaultValue) {
-		return fmt.Errorf("default_value must be valid JSON")
+	if len(req.DefaultValue) > 0 {
+		if !json.Valid(req.DefaultValue) {
+			return fmt.Errorf("default_value must be valid JSON")
+		}
+	} else {
+		switch req.Type {
+		case "boolean":
+			req.DefaultValue = json.RawMessage(`false`)
+		case "number":
+			req.DefaultValue = json.RawMessage(`0`)
+		case "string":
+			req.DefaultValue = json.RawMessage(`""`)
+		default:
+			req.DefaultValue = json.RawMessage(`null`)
+		}
 	}
 
 	return nil

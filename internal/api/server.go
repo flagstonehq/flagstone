@@ -277,6 +277,17 @@ func (s *Server) Routes() http.Handler {
 	)
 	mux.Handle("PUT /api/v1/projects/{slug}/flags/{key}/environments/{envSlug}", recoverMW(flagEnvUpdateHandler))
 
+	flagEnvToggleHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleToggleFlagEnvironment),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleMember),
+	)
+	mux.Handle("PATCH /api/v1/projects/{slug}/flags/{key}/environments/{envSlug}", recoverMW(flagEnvToggleHandler))
+
 	segmentsCreateHandler := s.withMiddleware(
 		http.HandlerFunc(s.handleCreateSegment),
 		middleware.RequestID(),
@@ -331,6 +342,15 @@ func (s *Server) Routes() http.Handler {
 		middleware.AuthJWT(s.cfg.JWTSecret),
 		middleware.RequireRole(auth.RoleAdmin),
 	)
+	flagStatesHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleListFlagStates),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthJWT(s.cfg.JWTSecret),
+		middleware.RequireRole(auth.RoleViewer),
+	)
+	mux.Handle("GET /api/v1/projects/{slug}/environments/{envSlug}/flag-states", recoverMW(flagStatesHandler))
+
 	mux.Handle("POST /api/v1/projects/{slug}/environments/{envSlug}/apikeys", recoverMW(apikeysCreateHandler))
 	apikeysListHandler := s.withMiddleware(
 		http.HandlerFunc(s.handleListAPIKeys),
