@@ -97,32 +97,81 @@ When deciding where something belongs, ask: *is this product functionality, or i
 
 ### Concrete boundary
 
-| Category | OSS | Cloud-only |
+The split is **not** feature-based. Every product capability ships in OSS. The only Cloud-only items are "someone runs it for you" + the commercial glue. If a row is in the Cloud column, it is because it is *operational* or *billing*, never because it is a feature.
+
+**Product capabilities — all OSS, all the same code:**
+
+| Capability | OSS | On Cloud |
 |---|---|---|
-| Rule engine, all operators, segments, rollouts | Yes | (same code) |
-| All SDKs (Go, TS, Python, etc.) | Yes | (same code) |
-| Multi-environment, multi-tenant architecture | Yes | (same code) |
-| RBAC, JWT, API keys | Yes | (same code) |
-| SSE streaming | Yes | (same code) |
-| OpenTelemetry traces & metrics | Yes | (same code) |
-| Webhooks | Yes | (same code) |
-| Audit log | Yes | (same code) |
-| Dashboard web UI | Yes | (same code) |
-| **SSO / SAML / OIDC** | Yes (self-hostable) | Pre-configured, supported |
-| Database, Redis | self-managed | Managed by us |
-| Backups, multi-AZ | self-managed | Managed by us |
-| Monitoring, alerting | self-managed | Managed by us |
+| Rule engine, all operators, prerequisites | Yes | same code |
+| Segments, percentage rollouts, targeting | Yes | same code |
+| Scheduled rollouts | Yes | same code |
+| Shadow mode (evaluate without serving) | Yes | same code |
+| Experimentation / A/B (when built) | Yes | same code |
+| All SDKs (Go first, then TS, Python, …) | Yes | same code |
+| OpenFeature provider | Yes | same code |
+| Multi-environment, multi-project, multi-tenant | Yes | same code |
+| SSE streaming / real-time updates | Yes | same code |
+| Webhooks | Yes | same code |
+| OpenTelemetry traces & metrics | Yes | same code |
+| Dashboard web UI | Yes | same code |
+| Audit log (immutable, DB-enforced) | Yes | same code |
+| Terraform provider, Helm chart | Yes | same code |
+| **RBAC, JWT, API keys** | Yes | same code |
+| **SSO / SAML / OIDC** | Yes (self-configure) | we pre-configure it |
+| **MFA (TOTP, WebAuthn)** | Yes | same code |
+| **Change-approval workflows** | Yes | same code |
+| **Quota / plan-limit *mechanism*** | Yes (defaults to unlimited) | enabled + wired to billing |
+
+> **The SSO line is the whole philosophy in one row.** The most common "OSS feels betrayed" trigger is paywalling SSO — it's what Unleash, Flagsmith, and GrowthBook all do via open-core. We don't. SAML 2.0 + OIDC are in the OSS build. What Cloud sells is *not having to configure them* — not the feature itself. Same logic for MFA, RBAC, and change approvals: **security is never a paywall.** This costs short-term revenue (no SSO upsell to free-tier Cloud users) and is the deliberate trade for long-term trust. Trust is the moat.
+
+**Operational & commercial — the only true Cloud-only column:**
+
+| Item | OSS (self-host) | Cloud |
+|---|---|---|
+| Database, Redis | you run them | managed by us |
+| Backups, multi-AZ, restore | you set up | managed by us |
+| Monitoring, alerting, on-call | you set up | managed by us |
 | SLA-backed uptime | none | 99.9% (Pro), 99.95% (Enterprise) |
-| Stripe billing, plan enforcement runtime | disabled | enabled |
-| Email/Slack support | community only | included |
-| Pre-built Grafana dashboards (hosted) | configure yourself | included |
-| Cross-tenant admin tooling | not applicable | Cloud-internal |
+| Hosted Grafana dashboards | configure yourself | included, pre-built |
+| Stripe billing & plan-enforcement *runtime* | disabled | enabled |
+| Status page (status.flagstone.dev) | n/a | we operate it |
+| Email / Slack support | community only | included |
+| Cross-tenant admin tooling | not applicable | Cloud-internal (private repo) |
 
-### Why include SSO in OSS
+### Where the line is drawn in code
 
-Putting SSO behind a paywall is the single most common "OSS feels betrayed" trigger. SSO is a security feature; everyone deserves it. The OSS version supports SAML 2.0 and OIDC out of the box. **What Cloud sells is not having to configure it.**
+- **Public repo (`flagstone`):** everything in the first table, *plus the quota-enforcement mechanism itself*. A quota check is just code — it ships open. The default is `FLAGSTONE_DEFAULT_PLAN=enterprise`, so a self-hoster gets unlimited everything with zero tricks.
+- **Private repo (`flagstone-cloud`):** imports `flagstone` as a Go dependency and adds only the commercial glue — Stripe webhooks, subscription state that *sets* a tenant's plan, billing emails, cross-tenant admin, and the deploy config for `cloud.flagstone.dev`. No product feature lives here.
 
-This is a deliberate decision that costs short-term revenue (we can't upsell SSO to free-tier Cloud users) but builds long-term trust. Trust is the moat.
+The test for any new code: *"Is this product functionality, or is this someone-runs-it / someone-pays-for-it?"* Only the second category is allowed in the private repo.
+
+---
+
+## Licensing
+
+The license is the single most expensive decision to reverse here — once external contributors commit under one license, changing it requires a signed agreement (CLA) from every one of them. **Decide it before the repo goes public**, not after.
+
+### The tension
+
+| Option | What it gives | What it risks |
+|---|---|---|
+| **MIT** (current plan) | Maximum trust. "No lock-in, take the code and run" is a literal truth. Best for adoption and the CISO sales argument. | A competitor (or a hyperscaler) can legally take Flagstone and operate a competing managed cloud, contributing nothing back. This is what burned Elastic, MongoDB, Redis. |
+| **FSL / BSL** (source-available) | Code is public and readable; anyone self-hosts freely for their own use; **only a competing commercial SaaS is forbidden.** Converts automatically to MIT/Apache after ~2 years. | Purists will say it's "not真 open source" (not OSI-approved). Some awesome-lists and distros won't include it. |
+
+### The decision
+
+**Default to MIT, but make it a conscious choice — not an accident.**
+
+Rationale: for a solo dev whose *entire revenue* is the managed Cloud, the realistic threat is not AWS (Flagstone is too small to be worth their while for years) — it's losing the trust narrative. MIT *is* the narrative: "feature flags are critical infra; you must be able to own them." Surrendering that to defend against a low-probability hyperscaler clone is a bad trade in year 1–2.
+
+**Revisit the moment either becomes true:**
+1. A competitor actually stands up a hosted Flagstone clone, or
+2. Cloud MRR is large enough that a clone would meaningfully hurt.
+
+At that point, relicense *new* versions to FSL (Sentry's model: FSL on the latest, auto-converting to Apache after 2 years). Because this is a real possibility, **require a CLA from external contributors from day one** — it keeps relicensing legally possible later. The CLA costs nothing now and preserves the option.
+
+> The engine and SDKs (`pkg/engine`, the SDK repos) should stay permissive (MIT/Apache) *regardless* — SDKs that link into customer apps must be unambiguously safe to embed. Any source-available restriction, if ever adopted, applies only to the server.
 
 ---
 
