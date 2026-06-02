@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 
+## [v0.2.0] - 2026-06-02
+
+[v0.2.0]: https://github.com/thomas-vilte/flagstone/compare/v0.1.0...v0.2.0
+
+In this release, we focused on expanding the core management capabilities of Flagstone by introducing user segments and more granular API controls. We also prioritized user experience with a fully responsive interface, dark mode support, and enhanced security through rate limiting.
+
+### 👥 Account & Setup
+
+- We introduced a comprehensive account management system and a streamlined initial setup process to get you started faster.
+- We added a setup status endpoint to provide real-time feedback on your environment configuration.
+- We modularized the setup page to create a more intuitive and cleaner onboarding experience.
+
+### 🚩 Feature Management & Segments
+
+- We implemented segment management, enabling you to group users and target features with greater precision.
+- We integrated rule validators to ensure your feature flag configurations are always accurate and reliable.
+- We added scoped API keys to provide more granular control over access and security for your integrations.
+- We implemented optimistic flag toggles to provide a faster, more responsive user experience when managing your flags.
+
+### 🔒 Security & Stability
+
+- We implemented robust session management and rate limiting to enhance the security and stability of the platform.
+
+### 🎨 User Interface
+
+- We added support for dark mode and implemented a fully responsive design, ensuring a great experience on any device.
+
 ## [v0.1.0] - 2026-06-01
 
 [v0.1.0]: https://github.com/thomas-vilte/flagstone/compare/v0.0.0...v0.1.0
