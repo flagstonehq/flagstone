@@ -1288,8 +1288,8 @@ Cada uno cubre **un riesgo concreto del modelo**, no exhaustividad:
 - [x] Crear `internal/engine/segments.go` (resolveSegment con cycle detection)
 - [x] Tests representativos (1 por riesgo, ver tabla arriba) — 24 tests, todos PASS
 - [x] Decision documentada: modelo OK — el schema actual es compatible, no necesita migracion 000004
-- [ ] Si aplica: migracion 000004 + ajustes en `models.go` + stores afectados — **N/A** (modelo OK)
-- [ ] Confirmar con un PR pequeno antes de empezar Fase 5
+- [x] Si aplica: migracion 000004 + ajustes en `models.go` + stores afectados — **N/A** (modelo OK)
+- [x] Confirmar con un PR pequeno antes de empezar Fase 5
 
 ---
 
@@ -3005,28 +3005,28 @@ export function formatRelative(iso: string): string {
 
 ### Checklist W0
 
-- [ ] `npm create next-app@16.2.6` con flags correctos
-- [ ] `next.config.ts` con `output: "standalone"` y `rewrites()` al backend
-- [ ] `middleware.ts` con proteccion de rutas y redirect logico
-- [ ] `tailwind.config.ts` con color primario `#364fc7` en CSS custom properties
-- [ ] `components.json` de shadcn configurado
-- [ ] Todos los componentes shadcn instalados (button, input, label, badge, table, dialog, switch, select, tabs, textarea, separator, avatar, dropdown-menu, alert, skeleton)
-- [ ] `lib/utils.ts`: `cn()`, `formatDate()`, `formatRelative()`
-- [ ] `lib/types.ts`: tipos del dominio (Flag, Rule, Condition, Project, Environment, APIKey, AuditEntry, Segment)
-- [ ] `lib/api.ts`: `apiFetch<T>()`, `ApiError`, funciones por recurso
-- [ ] `lib/schemas.ts`: schemas zod para todos los forms (login, create-project, create-flag, create-segment, create-api-key)
-- [ ] `vitest.config.ts` con happy-dom, paths alias, coverage thresholds
-- [ ] `playwright.config.ts` con webServer configurado
-- [ ] `__tests__/setup.ts` con MSW setup
-- [ ] `__tests__/mocks/handlers.ts` con handlers para todos los endpoints usados
-- [ ] `__tests__/mocks/server.ts` con MSW node server
-- [ ] Tests unitarios de `lib/utils.ts` (formatDate, formatRelative, cn)
-- [ ] Tests unitarios de `lib/schemas.ts` (casos validos e invalidos por schema)
-- [ ] `npm run test:run` pasa
-- [ ] `npm run build` pasa
-- [ ] `npm run typecheck` pasa
-- [ ] `Dockerfile` en `web/` funciona: `docker build -t flagstone-web web/`
-- [ ] Actualizar `docker-compose.yml` raiz para incluir servicio `web`
+- [x] `npm create next-app@16.2.6` con flags correctos
+- [x] `next.config.ts` con `output: "standalone"` y `rewrites()` al backend
+- [x] `proxy.ts` con proteccion de rutas y redirect logico (Next.js 16 renombró `middleware.ts` → `proxy.ts` y la función `middleware` → `proxy`)
+- [x] Color primario `#364fc7` en CSS custom properties (`globals.css` via `@theme` block — Tailwind v4 no requiere `tailwind.config.ts` para tokens)
+- [x] `components.json` de shadcn configurado
+- [x] Todos los componentes shadcn instalados (button, input, label, badge, table, dialog, switch, select, tabs, textarea, separator, avatar, dropdown-menu, alert, skeleton)
+- [x] `lib/utils.ts`: `cn()`, `formatDate()`, `formatRelative()`
+- [x] `lib/types.ts`: tipos del dominio (Flag, Rule, Condition, Project, Environment, APIKey, AuditEntry, Segment)
+- [x] `lib/api.ts`: `apiFetch<T>()`, `ApiError`, funciones por recurso
+- [x] `lib/schemas.ts`: schemas zod para todos los forms (login, create-project, create-flag, create-segment, create-api-key)
+- [x] `vitest.config.ts` con happy-dom, paths alias, coverage thresholds
+- [x] `playwright.config.ts` con webServer configurado
+- [x] `__tests__/setup.ts` con MSW setup
+- [x] `__tests__/mocks/handlers.ts` con handlers para todos los endpoints usados
+- [x] `__tests__/mocks/server.ts` con MSW node server
+- [x] Tests unitarios de `lib/utils.ts` (formatDate, formatRelative, cn)
+- [x] Tests unitarios de `lib/schemas.ts` (casos validos e invalidos por schema)
+- [x] `npm run test:run` pasa
+- [x] `npm run build` pasa
+- [x] `npm run typecheck` pasa
+- [x] `Dockerfile` en `web/` funciona
+- [x] Actualizar `docker-compose.yml` raiz para incluir servicio `web` (+ servicio `api`)
 
 ---
 
@@ -3086,19 +3086,19 @@ export const loginSchema = z.object({
 
 ### Checklist W1
 
-- [ ] `app/login/page.tsx` (Server Component, redirect si sesion existe)
-- [ ] `app/login/loading.tsx` (Skeleton del form)
-- [ ] `app/login/error.tsx` (error boundary)
-- [ ] `components/login/login-form.tsx` con react-hook-form + zod
-- [ ] `app/api/auth/login/route.ts` (setea httpOnly cookie)
-- [ ] `app/api/auth/logout/route.ts` (limpia cookie)
-- [ ] `app/api/auth/refresh/route.ts` (rota cookie)
-- [ ] `loginSchema` en `lib/schemas.ts`
-- [ ] Tests unitarios: LoginForm (renderiza, validacion client-side)
-- [ ] Tests integracion: login exitoso, credenciales incorrectas, cuenta bloqueada, multiple tenants
-- [ ] Tests E2E: login-success, login-invalid
-- [ ] `npm run test:run` pasa
-- [ ] `npm run typecheck` pasa
+- [x] `app/login/page.tsx` (Server Component, redirect si sesion existe)
+- [x] `app/login/loading.tsx` (Skeleton del form)
+- [x] `app/login/error.tsx` (error boundary)
+- [x] `components/login/login-form.tsx` con react-hook-form + zod
+- [x] `app/api/auth/login/route.ts` (setea httpOnly cookie)
+- [x] `app/api/auth/logout/route.ts` (limpia cookie)
+- [x] `app/api/auth/refresh/route.ts` (rota cookie)
+- [x] `loginSchema` en `lib/schemas.ts`
+- [x] Tests unitarios: LoginForm (renderiza, validacion client-side)
+- [x] Tests integracion: login exitoso, credenciales incorrectas, cuenta bloqueada, multiple tenants
+- [x] Tests E2E: login-success, login-invalid
+- [x] `npm run test:run` pasa
+- [x] `npm run typecheck` pasa
 
 ---
 
@@ -3139,18 +3139,18 @@ export const createProjectSchema = z.object({
 
 ### Checklist W2
 
-- [ ] `app/projects/page.tsx`
-- [ ] `app/projects/loading.tsx` (Skeletons de cards)
-- [ ] `app/projects/error.tsx`
-- [ ] `components/projects/project-card.tsx`
-- [ ] `components/projects/create-project-dialog.tsx`
-- [ ] `components/layout/sidebar.tsx` (nav global)
-- [ ] `components/layout/topbar.tsx`
-- [ ] `createProjectSchema` en `lib/schemas.ts`
-- [ ] Funciones en `lib/api.ts`: `getProjects()`, `createProject()`
-- [ ] Tests unitarios: ProjectCard, createProjectSchema
-- [ ] Tests integracion: lista, empty state, crear proyecto, slug duplicado
-- [ ] `npm run test:run` pasa
+- [x] `app/projects/page.tsx`
+- [x] `app/projects/loading.tsx` (Skeletons de cards)
+- [x] `app/projects/error.tsx`
+- [x] `components/projects/project-card.tsx`
+- [x] `components/projects/create-project-dialog.tsx`
+- [x] `components/layout/sidebar.tsx` (nav global)
+- [x] `components/layout/topbar.tsx`
+- [x] `createProjectSchema` en `lib/schemas.ts`
+- [x] Funciones en `lib/api.ts`: `getProjects()`, `createProject()`
+- [x] Tests unitarios: ProjectCard, createProjectSchema
+- [x] Tests integracion: lista, empty state, crear proyecto, slug duplicado
+- [x] `npm run test:run` pasa
 
 ---
 
@@ -3195,20 +3195,20 @@ export const createFlagSchema = z.object({
 
 ### Checklist W3
 
-- [ ] `app/projects/[slug]/flags/page.tsx`
-- [ ] `app/projects/[slug]/flags/loading.tsx`
-- [ ] `app/projects/[slug]/layout.tsx` (sidebar con nav de proyecto)
-- [ ] `components/flags/flags-table.tsx`
-- [ ] `components/flags/flag-row.tsx`
-- [ ] `components/flags/env-toggle.tsx`
-- [ ] `components/flags/create-flag-dialog.tsx`
-- [ ] `components/flags/archive-flag-button.tsx`
-- [ ] `createFlagSchema` en `lib/schemas.ts`
-- [ ] Funciones en `lib/api.ts`: `getFlags()`, `createFlag()`, `archiveFlag()`, `toggleFlagEnv()`
-- [ ] Tests unitarios: FlagRow, createFlagSchema, EnvToggle
-- [ ] Tests integracion: tabla, toggle, archive, create, 409
-- [ ] Tests E2E: toggle-flag, create-flag
-- [ ] `npm run test:run` pasa
+- [x] `app/projects/[slug]/flags/page.tsx`
+- [x] `app/projects/[slug]/flags/loading.tsx`
+- [x] `app/projects/[slug]/layout.tsx` (sidebar con nav de proyecto)
+- [x] `components/flags/flags-table.tsx`
+- [x] `components/flags/flag-row.tsx`
+- [x] `components/flags/env-toggle.tsx` (refactored con `useOptimistic` + `useTransition`)
+- [x] `components/flags/create-flag-dialog.tsx`
+- [x] `components/flags/archive-flag-button.tsx`
+- [x] `createFlagSchema` en `lib/schemas.ts`
+- [x] Funciones en `lib/api.ts`: `getFlags()`, `createFlag()`, `archiveFlag()`, `toggleFlagEnv()`
+- [x] Tests unitarios: FlagRow, createFlagSchema, EnvToggle
+- [x] Tests integracion: tabla, toggle, archive, create, 409
+- [x] Tests E2E: toggle-flag, create-flag
+- [x] `npm run test:run` pasa
 
 ---
 
@@ -3236,14 +3236,14 @@ export const createFlagSchema = z.object({
 
 ### Checklist W4
 
-- [ ] `app/projects/[slug]/settings/page.tsx`
-- [ ] `components/settings/project-settings-form.tsx`
-- [ ] `components/settings/environments-list.tsx`
-- [ ] `components/settings/danger-zone.tsx`
-- [ ] Funciones en `lib/api.ts`: `updateProject()`, `deleteProject()`, `getEnvironments()`, `createEnvironment()`, `deleteEnvironment()`
-- [ ] Tests unitarios: DangerZone (slug validation)
-- [ ] Tests integracion: rename, create env, delete project
-- [ ] `npm run test:run` pasa
+- [x] `app/projects/[slug]/settings/page.tsx`
+- [x] `components/settings/project-settings-form.tsx`
+- [x] `components/settings/environments-list.tsx`
+- [x] `components/settings/danger-zone.tsx`
+- [x] Funciones en `lib/api.ts`: `updateProject()`, `deleteProject()`, `getEnvironments()`, `createEnvironment()`, `deleteEnvironment()`
+- [x] Tests unitarios: DangerZone (slug validation)
+- [x] Tests integracion: rename, create env, delete project
+- [x] `npm run test:run` pasa
 
 ---
 
@@ -3288,17 +3288,17 @@ export const createApiKeySchema = z.object({
 
 ### Checklist W5
 
-- [ ] `app/projects/[slug]/api-keys/page.tsx`
-- [ ] `components/api-keys/api-keys-table.tsx`
-- [ ] `components/api-keys/create-key-dialog.tsx`
-- [ ] `components/api-keys/raw-key-modal.tsx`
-- [ ] `components/api-keys/revoke-key-button.tsx`
-- [ ] `createApiKeySchema` en `lib/schemas.ts`
-- [ ] Funciones en `lib/api.ts`: `getApiKeys()`, `createApiKey()`, `revokeApiKey()`
-- [ ] Tests unitarios: RawKeyModal (muestra, copia, limpia al cerrar), createApiKeySchema
-- [ ] Tests integracion: crear key, raw key modal, revocar key, estado vacio
-- [ ] Tests E2E: create-api-key flujo completo
-- [ ] `npm run test:run` pasa
+- [x] `app/projects/[slug]/api-keys/page.tsx`
+- [x] `components/api-keys/api-keys-table.tsx`
+- [x] `components/api-keys/create-key-dialog.tsx`
+- [x] `components/api-keys/raw-key-modal.tsx`
+- [x] `components/api-keys/revoke-key-button.tsx`
+- [x] `createApiKeySchema` en `lib/schemas.ts`
+- [x] Funciones en `lib/api.ts`: `getApiKeys()`, `createApiKey()`, `revokeApiKey()`
+- [x] Tests unitarios: RawKeyModal (muestra, copia, limpia al cerrar), createApiKeySchema
+- [x] Tests integracion: crear key, raw key modal, revocar key, estado vacio
+- [x] Tests E2E: create-api-key flujo completo (`__tests__/e2e/api-keys.spec.ts`)
+- [x] `npm run test:run` pasa
 
 ---
 
@@ -3326,14 +3326,14 @@ export const createApiKeySchema = z.object({
 
 ### Checklist W6
 
-- [ ] `app/projects/[slug]/audit/page.tsx`
-- [ ] `components/audit/audit-filters.tsx`
-- [ ] `components/audit/audit-table.tsx`
-- [ ] `components/audit/audit-row.tsx`
-- [ ] Funciones en `lib/api.ts`: `getAuditLog(filters)`
-- [ ] Tests unitarios: formatRelative, AuditRow
-- [ ] Tests integracion: tabla, filtros, paginacion
-- [ ] `npm run test:run` pasa
+- [x] `app/projects/[slug]/audit/page.tsx`
+- [x] `components/audit/audit-filters.tsx`
+- [x] `components/audit/audit-table.tsx`
+- [x] `components/audit/audit-row.tsx`
+- [x] Funciones en `lib/api.ts`: `getAuditLog(filters)`
+- [x] Tests unitarios: formatRelative, AuditRow
+- [x] Tests integracion: tabla, filtros, paginacion
+- [x] `npm run test:run` pasa
 
 ---
 
@@ -3373,14 +3373,14 @@ export const changePasswordSchema = z.object({
 
 ### Checklist W7
 
-- [ ] `app/account/page.tsx`
-- [ ] `components/account/change-password-form.tsx`
-- [ ] `components/account/sessions-list.tsx`
-- [ ] `changePasswordSchema` en `lib/schemas.ts`
-- [ ] Funciones en `lib/api.ts`: `getMe()`, `changePassword()`, `getSessions()`, `revokeSession()`
-- [ ] Tests unitarios: changePasswordSchema
-- [ ] Tests integracion: cambiar password, revocar sesion
-- [ ] `npm run test:run` pasa
+- [x] `app/account/page.tsx`
+- [x] `components/account/change-password-form.tsx`
+- [x] `components/account/sessions-list.tsx` (fix: handleRevokeAll preserva sesion actual)
+- [x] `changePasswordSchema` en `lib/schemas.ts`
+- [x] Funciones en `lib/api.ts`: `getMe()`, `changePassword()`, `getSessions()`, `revokeSession()`
+- [x] Tests unitarios: changePasswordSchema
+- [x] Tests integracion: cambiar password, revocar sesion
+- [x] `npm run test:run` pasa
 
 ---
 
@@ -3423,14 +3423,14 @@ export const setupSchema = z.object({
 
 ### Checklist W8
 
-- [ ] `app/setup/page.tsx`
-- [ ] `components/setup/setup-form.tsx`
-- [ ] `setupSchema` en `lib/schemas.ts`
-- [ ] Funciones en `lib/api.ts`: `getSetupStatus()`, `runSetup()`
-- [ ] Tests unitarios: setupSchema
-- [ ] Tests integracion: form valido, passwords no coinciden, tenant ya existe
-- [ ] Tests E2E: setup-flow
-- [ ] `npm run test:run` pasa
+- [x] `app/setup/page.tsx` (Server Component, importa SetupForm)
+- [x] `components/setup/setup-form.tsx`
+- [x] `setupSchema` en `lib/schemas.ts`
+- [x] Funciones en `lib/api.ts`: `getSetupStatus()`, `runSetup()`
+- [x] Tests unitarios: setupSchema
+- [x] Tests integracion: form valido, passwords no coinciden, tenant ya existe
+- [x] Tests E2E: setup-flow (`__tests__/e2e/setup.spec.ts`)
+- [x] `npm run test:run` pasa
 
 ---
 
@@ -3507,17 +3507,17 @@ export const rulesPayloadSchema = z.array(ruleSchema)
 
 ### Checklist W9
 
-- [ ] `app/projects/[slug]/flags/[key]/page.tsx`
-- [ ] `components/rules/rule-editor.tsx`
-- [ ] `components/rules/rule-card.tsx`
-- [ ] `components/rules/condition-row.tsx`
-- [ ] `components/rules/rollout-input.tsx`
-- [ ] `ruleSchema`, `conditionSchema`, `rulesPayloadSchema` en `lib/schemas.ts`
-- [ ] Funciones en `lib/api.ts`: `getFlagDetail()`, `getFlagEnvironment()`, `saveRules()`
-- [ ] Tests unitarios: RolloutInput, ConditionRow, ruleSchema, rulesPayloadSchema
-- [ ] Tests integracion: render, agregar/eliminar condicion, agregar/eliminar regla, save exitoso, 409 conflict, cambiar env con dirty state
-- [ ] Tests E2E: rule-editor flujo completo
-- [ ] `npm run test:run` pasa
+- [x] `app/projects/[slug]/flags/[key]/page.tsx`
+- [x] `components/rules/rule-editor.tsx` (fix: eliminado `showEnvConfirm` redundante, `pendingEnv !== null` es suficiente)
+- [x] `components/rules/rule-card.tsx`
+- [x] `components/rules/condition-row.tsx`
+- [x] `components/rules/rollout-input.tsx`
+- [x] `ruleSchema`, `conditionSchema`, `rulesPayloadSchema` en `lib/schemas.ts`
+- [x] Funciones en `lib/api.ts`: `getFlagDetail()`, `getFlagEnvironment()`, `saveRules()`
+- [x] Tests unitarios: RolloutInput, ConditionRow, ruleSchema, rulesPayloadSchema
+- [x] Tests integracion: render, agregar/eliminar condicion, agregar/eliminar regla, save exitoso, 409 conflict, cambiar env con dirty state
+- [x] Tests E2E: rule-editor flujo completo
+- [x] `npm run test:run` pasa
 
 ---
 
@@ -3554,15 +3554,15 @@ export const createSegmentSchema = z.object({
 
 ### Checklist W10
 
-- [ ] `app/projects/[slug]/segments/page.tsx`
-- [ ] `components/segments/segments-table.tsx`
-- [ ] `components/segments/create-segment-dialog.tsx`
-- [ ] `components/segments/segment-rule-editor.tsx`
-- [ ] `createSegmentSchema` en `lib/schemas.ts`
-- [ ] Funciones en `lib/api.ts`: `getSegments()`, `createSegment()`, `archiveSegment()`, `saveSegmentRules()`
-- [ ] Tests unitarios: createSegmentSchema, SegmentRuleEditor
-- [ ] Tests integracion: lista, crear, editar reglas
-- [ ] `npm run test:run` pasa
+- [x] `app/projects/[slug]/segments/page.tsx` + `[key]/page.tsx`
+- [x] `components/segments/segments-table.tsx`
+- [x] `components/segments/create-segment-dialog.tsx`
+- [x] `components/segments/segment-rule-editor.tsx`
+- [x] `createSegmentSchema` en `lib/schemas.ts`
+- [x] Funciones en `lib/api.ts`: `getSegments()`, `createSegment()`, `archiveSegment()`, `saveSegmentRules()`
+- [x] Tests unitarios: createSegmentSchema, SegmentRuleEditor
+- [x] Tests integracion: lista, crear, editar reglas
+- [x] `npm run test:run` pasa
 
 ---
 

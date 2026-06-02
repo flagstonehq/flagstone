@@ -153,7 +153,7 @@ test.describe("UI Exploration", () => {
     await page.screenshot({ path: "screenshots/14-setup-page.png", fullPage: true });
   });
 
-  test("15 - 404 page", async ({ page }) => {
+  test("15 - Segments page", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel(/email/i).fill("admin@acme.com");
     await page.getByLabel(/password/i).fill("password123");
@@ -161,7 +161,8 @@ test.describe("UI Exploration", () => {
     await page.waitForURL(/\/projects/, { timeout: 5000 });
     await page.goto("/projects/my-app/segments");
     await page.waitForLoadState("networkidle");
-    await page.screenshot({ path: "screenshots/15-404-page.png", fullPage: true });
+    await page.waitForTimeout(1000);
+    await page.screenshot({ path: "screenshots/15-segments-page.png", fullPage: true });
   });
 
   // Mobile screenshots

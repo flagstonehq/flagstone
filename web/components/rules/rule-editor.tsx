@@ -41,7 +41,6 @@ export function RuleEditor({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [pendingEnv, setPendingEnv] = useState<string | null>(null);
-  const [showEnvConfirm, setShowEnvConfirm] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
   const markDirty = useCallback(() => {
@@ -78,21 +77,18 @@ export function RuleEditor({
     if (!envSlug || envSlug === currentEnvSlug) return;
     if (isDirty) {
       setPendingEnv(envSlug);
-      setShowEnvConfirm(true);
     } else {
       router.push(`/projects/${projectSlug}/flags/${flagKey}?env=${envSlug}`);
     }
   }
 
   function confirmEnvChange() {
-    setShowEnvConfirm(false);
     if (pendingEnv) {
       router.push(`/projects/${projectSlug}/flags/${flagKey}?env=${pendingEnv}`);
     }
   }
 
   function cancelEnvChange() {
-    setShowEnvConfirm(false);
     setPendingEnv(null);
   }
 
@@ -201,7 +197,7 @@ export function RuleEditor({
       </div>
 
       {/* Env change confirm dialog */}
-      {showEnvConfirm && (
+      {pendingEnv !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-full max-w-sm rounded-lg bg-popover p-6 shadow-lg">
             <h2 className="text-base font-medium">Unsaved changes</h2>

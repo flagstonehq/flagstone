@@ -305,6 +305,132 @@ export const handlers = [
       updated_at: new Date().toISOString(),
     });
   }),
+  // Segments
+  http.get(`${API_BASE}/api/v1/projects/:slug/segments`, () =>
+    HttpResponse.json({
+      segments: [
+        {
+          id: "s1",
+          project_id: "p1",
+          key: "beta-users",
+          name: "Beta Users",
+          description: "Users enrolled in the beta program",
+          rules: { attribute: "plan", operator: "eq", value: "beta" },
+          archived_at: null,
+          created_at: new Date(Date.now() - 604800000).toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        {
+          id: "s2",
+          project_id: "p1",
+          key: "premium-customers",
+          name: "Premium Customers",
+          description: "Customers on premium plan",
+          rules: { attribute: "plan", operator: "eq", value: "premium" },
+          archived_at: null,
+          created_at: new Date(Date.now() - 259200000).toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        {
+          id: "s3",
+          project_id: "p1",
+          key: "internal-tools",
+          name: "Internal Tools",
+          description: "Internal employees only",
+          rules: { attribute: "email", operator: "ends_with", value: "@acme.com" },
+          archived_at: new Date().toISOString(),
+          created_at: new Date(Date.now() - 86400000 * 30).toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ],
+    }),
+  ),
+  // Single segment
+  http.get(`${API_BASE}/api/v1/projects/:slug/segments/:key`, ({ params }) => {
+    const { key } = params;
+    if (key === "beta-users") {
+      return HttpResponse.json({
+        segment: {
+          id: "s1",
+          project_id: "p1",
+          key: "beta-users",
+          name: "Beta Users",
+          description: "Users enrolled in the beta program",
+          rules: { attribute: "plan", operator: "eq", value: "beta" },
+          archived_at: null,
+          created_at: new Date(Date.now() - 604800000).toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      });
+    }
+    if (key === "premium-customers") {
+      return HttpResponse.json({
+        segment: {
+          id: "s2",
+          project_id: "p1",
+          key: "premium-customers",
+          name: "Premium Customers",
+          description: "Customers on premium plan",
+          rules: { attribute: "plan", operator: "eq", value: "premium" },
+          archived_at: null,
+          created_at: new Date(Date.now() - 259200000).toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      });
+    }
+    return HttpResponse.json(
+      { error: { code: "NOT_FOUND", message: "Segment not found" } },
+      { status: 404 },
+    );
+  }),
+  // Create segment
+  http.post(`${API_BASE}/api/v1/projects/:slug/segments`, async ({ request }) => {
+    const body = (await request.json()) as { key: string; name: string };
+    if (body.key === "duplicate-segment") {
+      return HttpResponse.json(
+        { error: { code: "KEY_CONFLICT", message: "Segment key already exists" } },
+        { status: 409 },
+      );
+    }
+    return HttpResponse.json(
+      {
+        segment: {
+          id: "s-new",
+          project_id: "p1",
+          key: body.key,
+          name: body.name,
+          description: null,
+          rules: [],
+          archived_at: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      },
+      { status: 201 },
+    );
+  }),
+  // Update segment
+  http.put(`${API_BASE}/api/v1/projects/:slug/segments/:key`, async ({ request, params }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json({
+      segment: {
+        id: "s1",
+        project_id: "p1",
+        key: params.key,
+        name: "Updated Segment",
+        description: body.description ?? null,
+        rules: body.rules ?? { attribute: "plan", operator: "eq", value: "beta" },
+        archived_at: null,
+        created_at: new Date(Date.now() - 604800000).toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    });
+  }),
+  // Archive segment
+  http.delete(
+    `${API_BASE}/api/v1/projects/:slug/segments/:key`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   // Audit
   http.get(`${API_BASE}/api/v1/audit`, ({ request }) => {
     const url = new URL(request.url);

@@ -860,8 +860,8 @@ UNION ALL SELECT 'audit_log', count(*) FROM audit_log;
 - [x] JWT authentication for dashboard
 - [x] bcrypt password hashing
 - [x] RBAC middleware
-- [ ] Rate limiting (in-process token bucket)
-- [ ] JSONB rule validation (depth, size, operator whitelist)
+- [x] Rate limiting (in-process token bucket) — login 5/min, refresh 10/min per IP
+- [x] JSONB rule validation (depth 10, max 100 rules, 64 KB, operator whitelist, attribute name format)
 - [x] Account lockout after repeated failed logins (T19)
 - [x] Refresh token reuse detection + session-wide invalidation (T20)
 
@@ -872,9 +872,9 @@ UNION ALL SELECT 'audit_log', count(*) FROM audit_log;
 - [ ] CSRF protection (if using cookie-based auth)
 - [ ] Security headers (CSP, HSTS, X-Frame-Options)
 - [ ] Dependency vulnerability scanning (Dependabot / govulncheck)
-- [ ] API key expiration enforcement
+- [x] API key expiration enforcement — checked in `AuthAPIKey` middleware
 - [ ] TOTP MFA — opt-in per user, RFC 6238 (T21)
-- [ ] Session management endpoints (list / revoke individual sessions)
+- [x] Session management endpoints (list / revoke individual sessions) — `GET/DELETE /api/v1/auth/sessions`
 - [ ] Login notification emails (new device / IP)
 - [ ] HaveIBeenPwned k-anonymity check on signup and password reset (T23)
 
