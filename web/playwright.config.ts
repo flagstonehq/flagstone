@@ -11,7 +11,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "npm run dev -p 3002",
+    command: "npm run dev",
     url: "http://localhost:3002",
     reuseExistingServer: true,
   },

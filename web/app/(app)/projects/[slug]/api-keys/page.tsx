@@ -20,10 +20,15 @@ export default async function ApiKeyPage({ params }: ApiKeysPaegProps) {
   let apiKeys: APIKey[] = [];
   let environments: Environment[] = [];
   try {
-    [apiKeys, environments] = await Promise.all([
-      serverFetch<APIKey[]>(`/api/v1/projects/${slug}/api-keys`, token),
-      serverFetch<Environment[]>(`/api/v1/projects/${slug}/environments`, token),
-    ]);
+    environments = await serverFetch<Environment[]>(
+      `/api/v1/projects/${slug}/environments`,
+      token,
+    );
+    const envSlug = environments[0]?.slug ?? "production";
+    apiKeys = await serverFetch<APIKey[]>(
+      `/api/v1/projects/${slug}/environments/${envSlug}/apikeys`,
+      token,
+    );
   } catch {
     // Backend endpoints may not be available yet
   }
