@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -162,8 +164,19 @@ func ipPtrToString(ip any) *string {
 	if ip == nil {
 		return nil
 	}
-	s := ip.(interface{ String() string }).String()
-	return &s
+	switch v := ip.(type) {
+	case *net.IP:
+		if v == nil {
+			return nil
+		}
+		s := v.String()
+		return &s
+	case fmt.Stringer:
+		s := v.String()
+		return &s
+	default:
+		return nil
+	}
 }
 
 func (s *Server) writeAudit(r *http.Request, tenantID, userID uuid.UUID, action, resourceType string, resourceID *uuid.UUID) {

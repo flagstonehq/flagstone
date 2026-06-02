@@ -14,7 +14,7 @@ func TestGenerateAndValidateAccessToken(t *testing.T) {
 	userID := uuid.New()
 	tenantID := uuid.New()
 
-	token, err := GenerateAccessToken(userID, tenantID, RoleAdmin.String(), testJWTSecret, 15*time.Minute)
+	token, err := GenerateAccessToken(userID, tenantID, RoleAdmin.String(), testJWTSecret, 15*time.Minute, uuid.Nil)
 	if err != nil {
 		t.Fatalf("GenerateAccessToken failed: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestValidateAccessTokenWrongSecret(t *testing.T) {
 	userID := uuid.New()
 	tenantID := uuid.New()
 
-	token, err := GenerateAccessToken(userID, tenantID, RoleViewer.String(), testJWTSecret, 15*time.Minute)
+	token, err := GenerateAccessToken(userID, tenantID, RoleViewer.String(), testJWTSecret, 15*time.Minute, uuid.Nil)
 	if err != nil {
 		t.Fatalf("GenerateAccessToken failed: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestValidateAccessTokenEmptySecret(t *testing.T) {
 
 func TestValidateAccessTokenExpired(t *testing.T) {
 	now := time.Now().UTC()
-	claims, err := NewClaims(uuid.New(), uuid.New(), RoleMember.String(), now.Add(-30*time.Minute), 15*time.Minute)
+	claims, err := NewClaims(uuid.New(), uuid.New(), RoleMember.String(), now.Add(-30*time.Minute), 15*time.Minute, uuid.Nil)
 	if err != nil {
 		t.Fatalf("NewClaims failed: %v", err)
 	}
@@ -104,19 +104,19 @@ func TestValidateAccessTokenMalformed(t *testing.T) {
 }
 
 func TestGenerateAccessTokenShortSecret(t *testing.T) {
-	if _, err := GenerateAccessToken(uuid.New(), uuid.New(), RoleViewer.String(), "short", 15*time.Minute); err == nil {
+	if _, err := GenerateAccessToken(uuid.New(), uuid.New(), RoleViewer.String(), "short", 15*time.Minute, uuid.Nil); err == nil {
 		t.Fatal("expected error for short secret")
 	}
 }
 
 func TestGenerateAccessTokenInvalidRole(t *testing.T) {
-	if _, err := GenerateAccessToken(uuid.New(), uuid.New(), "hacker", testJWTSecret, 15*time.Minute); err == nil {
+	if _, err := GenerateAccessToken(uuid.New(), uuid.New(), "hacker", testJWTSecret, 15*time.Minute, uuid.Nil); err == nil {
 		t.Fatal("expected error for invalid role")
 	}
 }
 
 func TestValidateAccessTokenWrongAlgorithm(t *testing.T) {
-	claims, err := NewClaims(uuid.New(), uuid.New(), RoleViewer.String(), time.Now(), 15*time.Minute)
+	claims, err := NewClaims(uuid.New(), uuid.New(), RoleViewer.String(), time.Now(), 15*time.Minute, uuid.Nil)
 	if err != nil {
 		t.Fatalf("NewClaims failed: %v", err)
 	}

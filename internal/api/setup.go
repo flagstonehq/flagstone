@@ -119,7 +119,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := auth.GenerateAccessToken(userID, tenantID, "owner", s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
+	accessToken, err := auth.GenerateAccessToken(userID, tenantID, "owner", s.cfg.JWTSecret, s.cfg.AccessTokenTTL, uuid.Nil)
 	if err != nil {
 		s.logger.Error("failed to generate access token", zap.Error(err))
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
@@ -177,6 +177,22 @@ func cryptoRandInt64() int64 {
 		return 0
 	}
 	return int64(binary.LittleEndian.Uint64(buf[:]))
+}
+
+func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
+	initialized, err := s.stores.Tenants.ExistsAny(r.Context())
+	if err != nil {
+		s.logger.Error("setup status: check exists", zap.Error(err))
+		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		return
+	}
+	middleware.JSON(w, http.StatusOK, struct {
+		Initialized bool   `json:"initialized"`
+		Message     string `json:"message,omitempty"`
+	}{
+		Initialized: initialized,
+		Message:     "System is ready. Please sign in.",
+	})
 }
 
 func slugifyTenantName(name string) string {

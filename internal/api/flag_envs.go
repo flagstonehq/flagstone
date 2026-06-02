@@ -111,9 +111,11 @@ func (s *Server) handleUpdateFlagEnvironment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if len(req.Rules) > 0 && !json.Valid(req.Rules) {
-		middleware.Error(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "rules must be valid JSON.")
-		return
+	if len(req.Rules) > 0 {
+		if err := ValidateFlagRules(req.Rules); err != nil {
+			middleware.Error(w, r, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+			return
+		}
 	}
 	if req.DefaultValue != nil && len(*req.DefaultValue) > 0 && !json.Valid(*req.DefaultValue) {
 		middleware.Error(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "default_value must be valid JSON.")
