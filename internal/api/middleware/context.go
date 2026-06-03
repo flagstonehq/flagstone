@@ -15,6 +15,7 @@ const (
 	keyLogger
 	keyClaims
 	keyEnvironmentID
+	keyAPIKeyID
 )
 
 // WithRequestID stores a request ID in the context.
@@ -65,6 +66,19 @@ func WithEnvironmentID(ctx context.Context, id uuid.UUID) context.Context {
 // EnvironmentIDFromContext extracts the environment ID from the context.
 func EnvironmentIDFromContext(ctx context.Context) uuid.UUID {
 	if id, ok := ctx.Value(keyEnvironmentID).(uuid.UUID); ok {
+		return id
+	}
+	return uuid.Nil
+}
+
+// WithAPIKeyID stores the authenticated API key ID in the context.
+func WithAPIKeyID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, keyAPIKeyID, id)
+}
+
+// APIKeyIDFromContext extracts the API key ID from the context.
+func APIKeyIDFromContext(ctx context.Context) uuid.UUID {
+	if id, ok := ctx.Value(keyAPIKeyID).(uuid.UUID); ok {
 		return id
 	}
 	return uuid.Nil

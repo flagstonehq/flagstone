@@ -45,6 +45,7 @@ func AuthAPIKey(stores *storage.Stores) func(http.Handler) http.Handler {
 			}(key.ID, now, r.Context())
 
 			ctx := WithEnvironmentID(r.Context(), key.EnvironmentID)
+			ctx = WithAPIKeyID(ctx, key.ID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

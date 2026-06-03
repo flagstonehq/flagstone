@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  security-events: write  # required for CodeQL to upload SARIF results
 
 jobs:
   security:

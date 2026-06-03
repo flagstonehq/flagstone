@@ -24,6 +24,12 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	return n, err
 }
 
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // Logger creates a request-scoped logger that logs method, path, status,
 // duration, and request ID after each request.
 func Logger(base *zap.Logger) func(http.Handler) http.Handler {

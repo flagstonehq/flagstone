@@ -151,6 +151,8 @@ func (s *Server) handleCreateSegment(w http.ResponseWriter, r *http.Request) {
 
 	s.writeAudit(r, tenantID, userID, "segment.created", "segment", uuidPtr(segment.ID))
 
+	s.publishSegmentChange(r.Context(), project.ID, segment.Key, "created")
+
 	middleware.JSON(w, http.StatusCreated, segmentResponseFromSegment(segment))
 }
 
@@ -335,6 +337,8 @@ func (s *Server) handleUpdateSegment(w http.ResponseWriter, r *http.Request) {
 
 	s.writeAudit(r, tenantID, userID, "segment.updated", "segment", uuidPtr(segment.ID))
 
+	s.publishSegmentChange(r.Context(), project.ID, segment.Key, "updated")
+
 	middleware.JSON(w, http.StatusOK, segmentResponseFromSegment(segment))
 }
 
@@ -388,6 +392,8 @@ func (s *Server) handleArchiveSegment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeAudit(r, tenantID, userID, "segment.archived", "segment", uuidPtr(segment.ID))
+
+	s.publishSegmentChange(r.Context(), project.ID, segment.Key, "archived")
 
 	w.WriteHeader(http.StatusNoContent)
 }

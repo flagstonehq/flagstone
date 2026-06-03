@@ -35,7 +35,7 @@ func TestMain(m *testing.M) {
 				AccessTokenTTL:  15 * time.Minute,
 				RefreshTokenTTL: 7 * 24 * time.Hour,
 			}
-			testServer = NewServer(stores, pool, cfg, zap.NewNop())
+			testServer = NewServer(stores, pool, cfg, zap.NewNop(), nil)
 			testServer.loginLimiter = middleware.NewIPRateLimiter(1_000_000, time.Minute)
 			testServer.refreshLimiter = middleware.NewIPRateLimiter(1_000_000, time.Minute)
 		}

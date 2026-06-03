@@ -154,6 +154,8 @@ func (s *Server) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.publishFlagChange(r.Context(), project.ID, req.Key, "created")
+
 	middleware.JSON(w, http.StatusCreated, resp)
 }
 
@@ -344,6 +346,8 @@ func (s *Server) handleUpdateFlag(w http.ResponseWriter, r *http.Request) {
 
 	s.writeAudit(r, tenantID, userID, "flag.updated", "flag", uuidPtr(flag.ID))
 
+	s.publishFlagChange(r.Context(), project.ID, flag.Key, "updated")
+
 	middleware.JSON(w, http.StatusOK, flagResponseFromFlag(flag))
 }
 
@@ -408,6 +412,8 @@ func (s *Server) handleArchiveFlag(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		s.logger.Error("archive flag: insert audit log", zap.Error(err))
 	}
+
+	s.publishFlagChange(r.Context(), project.ID, flag.Key, "archived")
 
 	w.WriteHeader(http.StatusNoContent)
 }
