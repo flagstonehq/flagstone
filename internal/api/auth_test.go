@@ -9,13 +9,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/flagstonehq/flagstone/internal/api/middleware"
 	"github.com/flagstonehq/flagstone/internal/auth"
 	"github.com/flagstonehq/flagstone/internal/storage"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// resetAuthState clears the auth-related tables so each auth test starts
+// hermetic. (Rate limiting is disabled for the test server in TestMain, so it
+// does not need resetting here.)
+func resetAuthState(t *testing.T) {
+	t.Helper()
+	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+}
 
 func seedAuthUser(t *testing.T) (tenantID, userID uuid.UUID, password string) {
 	t.Helper()
@@ -55,7 +63,7 @@ func seedSession(t *testing.T, tenantID, userID uuid.UUID) (rawToken string) {
 
 func TestLogin_Success(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	_, _, password := seedAuthUser(t)
 
@@ -91,7 +99,7 @@ func TestLogin_Success(t *testing.T) {
 
 func TestLogin_InvalidCredentials(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	seedAuthUser(t)
 
@@ -138,7 +146,7 @@ func TestLogin_InvalidCredentials(t *testing.T) {
 
 func TestLogin_ValidationErrors(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	tests := []struct {
 		name string
@@ -185,7 +193,7 @@ func TestLogin_ValidationErrors(t *testing.T) {
 
 func TestLogin_WrongContentType(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	body := `{"email":"auth@example.com","password":"securepass123"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
@@ -198,7 +206,7 @@ func TestLogin_WrongContentType(t *testing.T) {
 
 func TestLogin_LargeBody(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	largePayload := strings.Repeat("a", 2*1024*1024)
 	body := `{"email":"auth@example.com","password":"` + largePayload + `"}`
@@ -212,7 +220,7 @@ func TestLogin_LargeBody(t *testing.T) {
 
 func TestLogin_GET_returnsMethodNotAllowed(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
 	rec := httptest.NewRecorder()
@@ -223,7 +231,7 @@ func TestLogin_GET_returnsMethodNotAllowed(t *testing.T) {
 
 func TestRefresh_Success(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	tenantID, userID, _ := seedAuthUser(t)
 	rawRefresh := seedSession(t, tenantID, userID)
@@ -257,7 +265,7 @@ func TestRefresh_Success(t *testing.T) {
 
 func TestRefresh_MissingCookie(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
 	rec := httptest.NewRecorder()
@@ -268,7 +276,7 @@ func TestRefresh_MissingCookie(t *testing.T) {
 
 func TestRefresh_ExpiredSession(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	tenantID, userID, _ := seedAuthUser(t)
 
@@ -293,7 +301,7 @@ func TestRefresh_ExpiredSession(t *testing.T) {
 
 func TestLogout_Success(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	tenantID, userID, _ := seedAuthUser(t)
 	rawRefresh := seedSession(t, tenantID, userID)
@@ -320,7 +328,7 @@ func TestLogout_Success(t *testing.T) {
 
 func TestLogout_NoAuth(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
 	rec := httptest.NewRecorder()
@@ -331,7 +339,7 @@ func TestLogout_NoAuth(t *testing.T) {
 
 func TestLogin_LocksAfterFiveFailures(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	_, _, _ = seedAuthUser(t)
 
@@ -362,7 +370,7 @@ func TestLogin_LocksAfterFiveFailures(t *testing.T) {
 
 func TestLogin_SuccessClearsLockoutCounter(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	_, userID, _ := seedAuthUser(t)
 	ctx := context.Background()
@@ -394,7 +402,7 @@ func TestLogin_SuccessClearsLockoutCounter(t *testing.T) {
 
 func TestLogin_UnknownEmailDoesNotRecordAttempt(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	body := `{"email":"ghost@example.com","password":"anything"}`
 	for range 6 {
@@ -433,7 +441,7 @@ func seedMultiTenantUser(t *testing.T) (tenantA, tenantB *storage.Tenant, userID
 
 func TestLogin_MultiTenant_NoSlug_Returns409WithList(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	tenantA, tenantB, _, password := seedMultiTenantUser(t)
 
@@ -466,7 +474,7 @@ func TestLogin_MultiTenant_NoSlug_Returns409WithList(t *testing.T) {
 
 func TestLogin_MultiTenant_WithSlug_Succeeds(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	_, tenantB, _, password := seedMultiTenantUser(t)
 
@@ -485,7 +493,7 @@ func TestLogin_MultiTenant_WithSlug_Succeeds(t *testing.T) {
 
 func TestLogin_TenantSlug_UserNotMember_Returns401(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	_, _, _ = seedAuthUser(t)
 
@@ -510,7 +518,7 @@ func TestLogin_TenantSlug_UserNotMember_Returns401(t *testing.T) {
 
 func TestLogin_TenantSlug_NonExistent_Returns401(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	_, _, _ = seedAuthUser(t)
 
@@ -525,7 +533,7 @@ func TestLogin_TenantSlug_NonExistent_Returns401(t *testing.T) {
 
 func TestRefresh_ReuseDetected_KillsAllSessions(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	tenantID, userID, _ := seedAuthUser(t)
 	rawRefresh := seedSession(t, tenantID, userID)
@@ -553,7 +561,7 @@ func TestRefresh_ReuseDetected_KillsAllSessions(t *testing.T) {
 
 func TestRefresh_OldTokenAfterRotation_IsRevoked(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	tenantID, userID, _ := seedAuthUser(t)
 	rawRefresh := seedSession(t, tenantID, userID)
@@ -571,7 +579,7 @@ func TestRefresh_OldTokenAfterRotation_IsRevoked(t *testing.T) {
 
 func TestLogout_RevokesRefreshToken(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	tenantID, userID, _ := seedAuthUser(t)
 	rawRefresh := seedSession(t, tenantID, userID)
@@ -598,7 +606,7 @@ func TestLogout_RevokesRefreshToken(t *testing.T) {
 
 func TestLogin_NoTenantAccess(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	hash, err := auth.HashPassword("pass", testServer.cfg.BcryptCost)
 	require.NoError(t, err)
@@ -621,7 +629,7 @@ func TestLogin_NoTenantAccess(t *testing.T) {
 
 func TestRefresh_AttackScenario_StolenTokenBurnsLegitSession(t *testing.T) {
 	skipIfNoDB(t)
-	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+	resetAuthState(t)
 
 	tenantID, userID, _ := seedAuthUser(t)
 	stolenToken := seedSession(t, tenantID, userID)

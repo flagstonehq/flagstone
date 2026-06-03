@@ -1,11 +1,18 @@
 name: CI
+
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**", "LICENSE", ".github/CODEOWNERS"]
   pull_request:
+    paths-ignore: ["**.md", "docs/**", "LICENSE", ".github/CODEOWNERS"]
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   go:

@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/flagstonehq/flagstone/internal/api/middleware"
 	"github.com/flagstonehq/flagstone/internal/storage"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 

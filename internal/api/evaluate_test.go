@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flagstonehq/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/pkg/engine"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/flagstonehq/flagstone/internal/auth"
-	"github.com/flagstonehq/flagstone/pkg/engine"
-	"github.com/flagstonehq/flagstone/internal/storage"
 )
 
 func seedEvaluateData(t *testing.T) (tenantID, projectID uuid.UUID, envSlug, apiKey string) {

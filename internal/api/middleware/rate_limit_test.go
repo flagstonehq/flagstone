@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flagstonehq/flagstone/internal/api/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/flagstonehq/flagstone/internal/api/middleware"
 )
 
 func TestIPRateLimiter_Allow(t *testing.T) {

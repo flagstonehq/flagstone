@@ -31,12 +31,6 @@ type setupStatus struct {
 	Initialized bool `json:"initialized"`
 }
 
-type loginResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int    `json:"expires_in"`
-}
-
 type environment struct {
 	ID        string `json:"id"`
 	ProjectID string `json:"project_id"`
@@ -307,22 +301,6 @@ func postSetup(base string) (string, error) {
 	}
 	if resp.AccessToken == "" {
 		return "", fmt.Errorf("setup response missing access_token")
-	}
-	return resp.AccessToken, nil
-}
-
-func login(base string) (string, error) {
-	body := map[string]string{
-		"email":       adminEmail,
-		"password":    adminPassword,
-		"tenant_slug": tenantSlug,
-	}
-	var resp loginResponse
-	if err := doJSON(http.MethodPost, base+"/api/v1/auth/login", body, &resp, ""); err != nil {
-		return "", err
-	}
-	if resp.AccessToken == "" {
-		return "", fmt.Errorf("login response missing access_token")
 	}
 	return resp.AccessToken, nil
 }

@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/flagstonehq/flagstone/internal/api/middleware"
 	"github.com/flagstonehq/flagstone/internal/config"
 	"github.com/flagstonehq/flagstone/internal/storage"
 	"github.com/flagstonehq/flagstone/internal/testutil/pgtest"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
 
@@ -23,6 +24,7 @@ func TestMain(m *testing.M) {
 	var cleanup func()
 	if !testing.Short() {
 		pool, c, err := pgtest.Setup(context.Background(), "flagstone_test_api", "../../migrations")
+		pgtest.RequireInCI(err)
 		if err == nil {
 			testPool = pool
 			cleanup = c
@@ -34,6 +36,8 @@ func TestMain(m *testing.M) {
 				RefreshTokenTTL: 7 * 24 * time.Hour,
 			}
 			testServer = NewServer(stores, pool, cfg, zap.NewNop())
+			testServer.loginLimiter = middleware.NewIPRateLimiter(1_000_000, time.Minute)
+			testServer.refreshLimiter = middleware.NewIPRateLimiter(1_000_000, time.Minute)
 		}
 	}
 

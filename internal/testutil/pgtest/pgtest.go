@@ -111,6 +111,16 @@ func Setup(ctx context.Context, schemaName, migrationsDir string) (*pgxpool.Pool
 	return pool, cleanup, nil
 }
 
+// RequireInCI turns a Setup error into a fatal failure when running under CI
+// (GitHub Actions sets CI=true). Locally — where a developer may not have
+// Postgres running — it is a no-op, so TestMain can fall back to skipping.
+// This prevents CI from passing green with all DB-backed tests silently skipped.
+func RequireInCI(err error) {
+	if err != nil && os.Getenv("CI") != "" {
+		panic("pgtest: Postgres is required under CI but setup failed: " + err.Error())
+	}
+}
+
 func applyMigrations(ctx context.Context, conn *pgx.Conn, dir string) error {
 	files, err := filepath.Glob(filepath.Join(dir, "*.up.sql"))
 	if err != nil {

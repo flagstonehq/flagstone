@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flagstonehq/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/storage"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/flagstonehq/flagstone/internal/auth"
-	"github.com/flagstonehq/flagstone/internal/storage"
 )
 
 func seedProject(t *testing.T) (tenantID, userID, projectID uuid.UUID, projectSlug, token string) {

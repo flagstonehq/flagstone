@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/flagstonehq/flagstone/internal/api/middleware"
 	"github.com/flagstonehq/flagstone/internal/auth"
 	"github.com/flagstonehq/flagstone/internal/storage"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 )
 
@@ -399,7 +399,7 @@ func (s *Server) writeDecodeError(w http.ResponseWriter, r *http.Request, err er
 }
 
 func (s *Server) setRefreshCookie(w http.ResponseWriter, raw string, expiresAt time.Time) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is gated on IsProd() so the cookie still works over http://localhost in dev
 		Name:     "refresh_token",
 		Value:    raw,
 		HttpOnly: true,
@@ -411,7 +411,7 @@ func (s *Server) setRefreshCookie(w http.ResponseWriter, raw string, expiresAt t
 }
 
 func (s *Server) clearRefreshCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is gated on IsProd() so the cookie still works over http://localhost in dev
 		Name:     "refresh_token",
 		Value:    "",
 		HttpOnly: true,

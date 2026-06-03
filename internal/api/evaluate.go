@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/flagstonehq/flagstone/internal/api/middleware"
-	"github.com/flagstonehq/flagstone/pkg/engine"
 	"github.com/flagstonehq/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/pkg/engine"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 

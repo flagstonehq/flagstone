@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/flagstonehq/flagstone/internal/auth"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
-	"github.com/flagstonehq/flagstone/internal/auth"
 	"go.uber.org/zap"
 )
 

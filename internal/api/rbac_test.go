@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flagstonehq/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/storage"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/flagstonehq/flagstone/internal/auth"
-	"github.com/flagstonehq/flagstone/internal/storage"
 )
 
 func seedUserWithRole(t *testing.T, role string) (tenantID, userID uuid.UUID, token string) {
@@ -184,7 +184,7 @@ func TestRBAC_AdminCanCreateEverywhere(t *testing.T) {
 			strings.NewReader(`{"key":"f1","name":"F1","type":"boolean","default_value":false}`))},
 		{"create segment", httptest.NewRequest(http.MethodPost,
 			"/api/v1/projects/"+project.Slug+"/segments",
-			strings.NewReader(`{"key":"s1","name":"S1","rules":[]}`))},
+			strings.NewReader(`{"key":"s1","name":"S1","rules":{"all":[]}}`))},
 		{"create apikey", httptest.NewRequest(http.MethodPost,
 			"/api/v1/projects/"+project.Slug+"/environments/"+env.Slug+"/apikeys",
 			strings.NewReader(`{"name":"K1"}`))},

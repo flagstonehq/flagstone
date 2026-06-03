@@ -33,6 +33,14 @@ func NewIPRateLimiter(limit int, window time.Duration) *IPRateLimiter {
 	return rl
 }
 
+// Reset clears all per-IP windows. Intended for tests that share a process-wide
+// limiter and need a hermetic starting point between cases.
+func (rl *IPRateLimiter) Reset() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.entries = make(map[string]*windowEntry)
+}
+
 // Allow reports whether the request from ip should be allowed through.
 func (rl *IPRateLimiter) Allow(ip string) bool {
 	rl.mu.Lock()

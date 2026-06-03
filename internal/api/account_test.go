@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flagstonehq/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/storage"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/flagstonehq/flagstone/internal/auth"
-	"github.com/flagstonehq/flagstone/internal/storage"
 )
 
 func TestGetMe_Success(t *testing.T) {

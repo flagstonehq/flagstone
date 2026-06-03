@@ -6,9 +6,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/flagstonehq/flagstone/internal/testutil/pgtest"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/flagstonehq/flagstone/internal/testutil/pgtest"
 )
 
 var testPool *pgxpool.Pool

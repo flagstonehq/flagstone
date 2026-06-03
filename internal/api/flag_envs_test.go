@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flagstonehq/flagstone/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/flagstonehq/flagstone/internal/storage"
 )
 
 func seedFlagWithEnv(t *testing.T) (projectSlug, flagKey, envSlug, token string) {
@@ -105,7 +105,7 @@ func TestUpdateFlagEnvironment_Success(t *testing.T) {
 
 	projectSlug, flagKey, envSlug, token := seedFlagWithEnv(t)
 
-	body := `{"enabled":true,"rules":[{"type":"equals","attribute":"country","value":"ar"}],"version":1}`
+	body := `{"enabled":true,"rules":[{"conditions":{"all":[{"attribute":"country","op":"eq","value":"ar"}]}}],"version":1}`
 	req := httptest.NewRequest(http.MethodPut,
 		"/api/v1/projects/"+projectSlug+"/flags/"+flagKey+"/environments/"+envSlug,
 		strings.NewReader(body))

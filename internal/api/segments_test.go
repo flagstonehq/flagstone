@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flagstonehq/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/storage"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/flagstonehq/flagstone/internal/auth"
-	"github.com/flagstonehq/flagstone/internal/storage"
 )
 
 func TestCreateSegment_Success(t *testing.T) {
@@ -21,7 +21,7 @@ func TestCreateSegment_Success(t *testing.T) {
 
 	_, _, _, projectSlug, token := seedProject(t)
 
-	body := `{"key":"beta-users","name":"Beta Users","rules":[{"type":"equals","attribute":"email","value":"@beta.com"}]}`
+	body := `{"key":"beta-users","name":"Beta Users","rules":{"all":[{"attribute":"email","op":"eq","value":"@beta.com"}]}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectSlug+"/segments", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(authBearer(token))
@@ -55,7 +55,7 @@ func TestCreateSegment_DuplicateKey(t *testing.T) {
 	}
 	require.NoError(t, testServer.stores.Segments.Create(context.Background(), seg))
 
-	body := `{"key":"beta-users","name":"Duplicate","rules":[]}`
+	body := `{"key":"beta-users","name":"Duplicate","rules":{"all":[]}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectSlug+"/segments", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(authBearer(token))
@@ -72,7 +72,7 @@ func TestCreateSegment_ProjectNotFound(t *testing.T) {
 
 	_, _, _, _, token := seedProject(t)
 
-	body := `{"key":"beta-users","name":"Beta Users","rules":[]}`
+	body := `{"key":"beta-users","name":"Beta Users","rules":{"all":[]}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/nonexistent/segments", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(authBearer(token))
@@ -203,7 +203,7 @@ func TestUpdateSegment_Success(t *testing.T) {
 	}
 	require.NoError(t, testServer.stores.Segments.Create(context.Background(), seg))
 
-	body := `{"name":"Beta Users V2","rules":[{"type":"equals","attribute":"country","value":"ar"}]}`
+	body := `{"name":"Beta Users V2","rules":{"all":[{"attribute":"country","op":"eq","value":"ar"}]}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/projects/"+projectSlug+"/segments/beta-users", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(authBearer(token))
