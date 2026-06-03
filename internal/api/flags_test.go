@@ -443,12 +443,10 @@ func TestArchiveFlag_AlreadyArchived(t *testing.T) {
 
 	path := "/api/v1/projects/" + projectSlug + "/flags/to-archive"
 
-	// First archive succeeds.
 	req := httptest.NewRequest(http.MethodDelete, path, nil)
 	req.Header.Set(authBearer(token))
 	testServer.Routes().ServeHTTP(httptest.NewRecorder(), req)
 
-	// Second archive on the same key returns 404 (already gone).
 	req = httptest.NewRequest(http.MethodDelete, path, nil)
 	req.Header.Set(authBearer(token))
 	rec := httptest.NewRecorder()

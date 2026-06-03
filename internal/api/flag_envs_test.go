@@ -188,7 +188,6 @@ func TestToggleFlagEnvironment_Disable(t *testing.T) {
 
 	projectSlug, flagKey, envSlug, token := seedFlagWithEnv(t)
 
-	// First enable it.
 	body := `{"enabled":true}`
 	req := httptest.NewRequest(http.MethodPatch,
 		"/api/v1/projects/"+projectSlug+"/flags/"+flagKey+"/environments/"+envSlug,
@@ -197,7 +196,6 @@ func TestToggleFlagEnvironment_Disable(t *testing.T) {
 	req.Header.Set(authBearer(token))
 	testServer.Routes().ServeHTTP(httptest.NewRecorder(), req)
 
-	// Now disable it.
 	body = `{"enabled":false}`
 	req = httptest.NewRequest(http.MethodPatch,
 		"/api/v1/projects/"+projectSlug+"/flags/"+flagKey+"/environments/"+envSlug,

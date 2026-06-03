@@ -160,8 +160,6 @@ func TestListEnvironments_Success(t *testing.T) {
 	assert.Len(t, resp, 3)
 }
 
-// seedProjectWithOwner is like seedProject but uses the "owner" role, required
-// by handlers protected with RequireRole(RoleOwner) (e.g. DeleteEnvironment).
 func seedProjectWithOwner(t *testing.T) (projectID uuid.UUID, projectSlug, token string) {
 	t.Helper()
 	tenantID, userID, _ := seedUserWithRole(t, "owner")
