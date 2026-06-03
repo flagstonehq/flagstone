@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/flagstonehq/flagstone/internal/api/middleware"
 	"github.com/flagstonehq/flagstone/internal/auth"
 	"github.com/flagstonehq/flagstone/internal/config"
-	"github.com/flagstonehq/flagstone/pkg/engine"
 	"github.com/flagstonehq/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/pkg/engine"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
 
@@ -376,7 +376,7 @@ func (s *Server) Routes() http.Handler {
 		middleware.AuthJWT(s.cfg.JWTSecret),
 		middleware.RequireRole(auth.RoleViewer),
 	)
-	mux.Handle("GET /api/v1/projects/{slug}/audit", recoverMW(auditHandler))
+	mux.Handle("GET /api/v1/audit", recoverMW(auditHandler))
 
 	evaluateSingleHandler := s.withMiddleware(
 		http.HandlerFunc(s.handleEvaluateFlag),

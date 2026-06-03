@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flagstonehq/flagstone/internal/api/middleware"
+	"github.com/flagstonehq/flagstone/internal/auth"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/flagstonehq/flagstone/internal/api/middleware"
-	"github.com/flagstonehq/flagstone/internal/auth"
 	"go.uber.org/zap"
 )
 
@@ -96,7 +96,9 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		return
 	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
+	// Use a background context so the rollback still runs even if the request
+	// context was cancelled (e.g. client disconnect) before commit.
+	defer func() { _ = tx.Rollback(context.Background()) }()
 
 	if err := executeBootstrap(r.Context(), tx, tenantID, userID, slug, req, passwordHash, refreshHash, now, expiresAt); err != nil {
 		if errors.Is(err, errAlreadyInitialized) {
@@ -126,7 +128,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is gated on IsProd() so the cookie still works over http://localhost in dev
 		Name:     "refresh_token",
 		Value:    refreshRaw,
 		HttpOnly: true,
