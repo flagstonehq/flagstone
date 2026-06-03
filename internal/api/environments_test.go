@@ -160,6 +160,145 @@ func TestListEnvironments_Success(t *testing.T) {
 	assert.Len(t, resp, 3)
 }
 
+// seedProjectWithOwner is like seedProject but uses the "owner" role, required
+// by handlers protected with RequireRole(RoleOwner) (e.g. DeleteEnvironment).
+func seedProjectWithOwner(t *testing.T) (projectID uuid.UUID, projectSlug, token string) {
+	t.Helper()
+	tenantID, userID, _ := seedUserWithRole(t, "owner")
+	project := &storage.Project{TenantID: tenantID, Slug: "owner-proj-" + uuid.New().String()[:8], Name: "Owner Project"}
+	require.NoError(t, testServer.stores.Projects.Create(context.Background(), project))
+	tok, err := auth.GenerateAccessToken(userID, tenantID, "owner", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL, uuid.Nil)
+	require.NoError(t, err)
+	return project.ID, project.Slug, tok
+}
+
+func TestDeleteEnvironment_Success(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "projects", "tenant_members", "users", "tenants")
+
+	projectID, projectSlug, token := seedProjectWithOwner(t)
+	env := &storage.Environment{ProjectID: projectID, Slug: "staging", Name: "Staging"}
+	require.NoError(t, testServer.stores.Environments.Create(context.Background(), env))
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/v1/projects/"+projectSlug+"/environments/staging", nil)
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+
+	_, err := testServer.stores.Environments.GetBySlug(context.Background(), projectID, "staging")
+	assert.ErrorIs(t, err, storage.ErrEnvironmentNotFound)
+}
+
+func TestDeleteEnvironment_NotFound(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "environments", "projects", "tenant_members", "users", "tenants")
+
+	_, projectSlug, token := seedProjectWithOwner(t)
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/v1/projects/"+projectSlug+"/environments/nonexistent", nil)
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestDeleteEnvironment_ProjectNotFound(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "environments", "projects", "tenant_members", "users", "tenants")
+
+	_, _, token := seedProjectWithOwner(t)
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/v1/projects/nonexistent/environments/staging", nil)
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestDeleteEnvironment_RequiresOwner(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "environments", "projects", "tenant_members", "users", "tenants")
+
+	_, _, _, projectSlug, token := seedProject(t) // admin role — should be denied
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/v1/projects/"+projectSlug+"/environments/any", nil)
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestListFlagStates_Success(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "projects", "tenant_members", "users", "tenants")
+
+	projectSlug, flagKey, envSlug, token := seedFlagWithEnv(t)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/projects/"+projectSlug+"/environments/"+envSlug+"/flag-states", nil)
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp []flagEnvironmentResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp, 1)
+	assert.Equal(t, flagKey, "test-flag")
+	assert.False(t, resp[0].Enabled)
+}
+
+func TestListFlagStates_Empty(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "projects", "tenant_members", "users", "tenants")
+
+	_, _, projectID, projectSlug, token := seedProject(t)
+	env := &storage.Environment{ProjectID: projectID, Slug: "empty-env", Name: "Empty"}
+	require.NoError(t, testServer.stores.Environments.Create(context.Background(), env))
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/projects/"+projectSlug+"/environments/empty-env/flag-states", nil)
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp []flagEnvironmentResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Empty(t, resp)
+}
+
+func TestListFlagStates_EnvironmentNotFound(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "environments", "projects", "tenant_members", "users", "tenants")
+
+	_, _, _, projectSlug, token := seedProject(t)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/projects/"+projectSlug+"/environments/nonexistent/flags", nil)
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
 func TestEnvironments_RequiresAuth(t *testing.T) {
 	skipIfNoDB(t)
 	truncateTables(t, "audit_log", "sessions", "environments", "projects", "tenant_members", "users", "tenants")

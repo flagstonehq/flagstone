@@ -162,3 +162,82 @@ func TestUpdateFlagEnvironment_FlagNotFound(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
+
+func TestToggleFlagEnvironment_Enable(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "projects", "tenant_members", "users", "tenants")
+
+	projectSlug, flagKey, envSlug, token := seedFlagWithEnv(t)
+
+	body := `{"enabled":true}`
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/projects/"+projectSlug+"/flags/"+flagKey+"/environments/"+envSlug,
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestToggleFlagEnvironment_Disable(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "projects", "tenant_members", "users", "tenants")
+
+	projectSlug, flagKey, envSlug, token := seedFlagWithEnv(t)
+
+	// First enable it.
+	body := `{"enabled":true}`
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/projects/"+projectSlug+"/flags/"+flagKey+"/environments/"+envSlug,
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(authBearer(token))
+	testServer.Routes().ServeHTTP(httptest.NewRecorder(), req)
+
+	// Now disable it.
+	body = `{"enabled":false}`
+	req = httptest.NewRequest(http.MethodPatch,
+		"/api/v1/projects/"+projectSlug+"/flags/"+flagKey+"/environments/"+envSlug,
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestToggleFlagEnvironment_FlagNotFound(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "projects", "tenant_members", "users", "tenants")
+
+	projectSlug, _, envSlug, token := seedFlagWithEnv(t)
+
+	body := `{"enabled":true}`
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/projects/"+projectSlug+"/flags/nonexistent/environments/"+envSlug,
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestToggleFlagEnvironment_NoAuth(t *testing.T) {
+	skipIfNoDB(t)
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/projects/any/flags/any/environments/any",
+		strings.NewReader(`{"enabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}

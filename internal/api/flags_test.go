@@ -360,3 +360,99 @@ func TestFlags_RequiresAuth(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateFlag_ValidationErrors(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "projects", "tenant_members", "users", "tenants")
+
+	_, _, projectID, projectSlug, token := seedProject(t)
+	flag := &storage.Flag{
+		ProjectID:    projectID,
+		Key:          "my-feature",
+		Name:         "My Feature",
+		Type:         "boolean",
+		DefaultValue: json.RawMessage("false"),
+	}
+	require.NoError(t, testServer.stores.Flags.Create(context.Background(), flag))
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"empty name", `{"name":""}`},
+		{"invalid type", `{"type":"unknown"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPut,
+				"/api/v1/projects/"+projectSlug+"/flags/my-feature",
+				strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set(authBearer(token))
+			rec := httptest.NewRecorder()
+			testServer.Routes().ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+		})
+	}
+}
+
+func TestUpdateFlag_PartialUpdate(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "projects", "tenant_members", "users", "tenants")
+
+	_, _, projectID, projectSlug, token := seedProject(t)
+	flag := &storage.Flag{
+		ProjectID:    projectID,
+		Key:          "partial-flag",
+		Name:         "Original Name",
+		Type:         "boolean",
+		DefaultValue: json.RawMessage("false"),
+	}
+	require.NoError(t, testServer.stores.Flags.Create(context.Background(), flag))
+
+	body := `{"name":"New Name"}`
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/v1/projects/"+projectSlug+"/flags/partial-flag",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+	testServer.Routes().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp flagResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "New Name", resp.Name)
+	assert.Equal(t, "boolean", resp.Type, "type must not change when omitted")
+}
+
+func TestArchiveFlag_AlreadyArchived(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "projects", "tenant_members", "users", "tenants")
+
+	_, _, projectID, projectSlug, token := seedProject(t)
+	flag := &storage.Flag{
+		ProjectID:    projectID,
+		Key:          "to-archive",
+		Name:         "Archive Me",
+		Type:         "boolean",
+		DefaultValue: json.RawMessage("false"),
+	}
+	require.NoError(t, testServer.stores.Flags.Create(context.Background(), flag))
+
+	path := "/api/v1/projects/" + projectSlug + "/flags/to-archive"
+
+	// First archive succeeds.
+	req := httptest.NewRequest(http.MethodDelete, path, nil)
+	req.Header.Set(authBearer(token))
+	testServer.Routes().ServeHTTP(httptest.NewRecorder(), req)
+
+	// Second archive on the same key returns 404 (already gone).
+	req = httptest.NewRequest(http.MethodDelete, path, nil)
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}

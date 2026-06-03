@@ -343,3 +343,32 @@ func TestSegments_RequiresAuth(t *testing.T) {
 		})
 	}
 }
+func TestUpdateSegment_ValidationErrors(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "segments", "projects", "tenant_members", "users", "tenants")
+
+	_, _, projectID, projectSlug, token := seedProject(t)
+	seg := &storage.Segment{ProjectID: projectID, Key: "seg-val", Name: "Seg", Rules: json.RawMessage("{}")}
+	require.NoError(t, testServer.stores.Segments.Create(context.Background(), seg))
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"empty key", `{"key":""}`},
+		{"key uppercase", `{"key":"UPPER"}`},
+		{"key too long", `{"key":"` + strings.Repeat("a", 129) + `"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/projects/"+projectSlug+"/segments/seg-val",
+				strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set(authBearer(token))
+			rec := httptest.NewRecorder()
+			testServer.Routes().ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+		})
+	}
+}
