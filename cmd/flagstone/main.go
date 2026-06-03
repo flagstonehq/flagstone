@@ -80,7 +80,7 @@ func main() {
 
 	stores := storage.NewStores(dbPool)
 
-	apiServer := api.NewServer(stores, dbPool, cfg, logger)
+	apiServer := api.NewServer(stores, dbPool, cfg, logger, redisClient)
 	apiServer.StartCleanup(rootCtx)
 
 	mux := http.NewServeMux()

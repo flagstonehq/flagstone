@@ -5,9 +5,11 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/flagstonehq/flagstone/internal/api/middleware"
 	"github.com/flagstonehq/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/internal/streaming"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
@@ -186,6 +188,13 @@ func (s *Server) handleToggleFlagEnvironment(w http.ResponseWriter, r *http.Requ
 		s.logger.Error("toggle flag env: audit log", zap.Error(auditErr))
 	}
 
+	s.hub.Publish(streaming.Event{
+		EnvironmentID: env.ID,
+		Type:          streaming.EventFlagChange,
+		Payload:       map[string]any{"key": flag.Key, "action": "toggled"},
+		Timestamp:     time.Now().UTC(),
+	})
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -287,6 +296,13 @@ func (s *Server) handleUpdateFlagEnvironment(w http.ResponseWriter, r *http.Requ
 	}); err != nil {
 		s.logger.Error("update flag env: insert audit log", zap.Error(err))
 	}
+
+	s.hub.Publish(streaming.Event{
+		EnvironmentID: env.ID,
+		Type:          streaming.EventFlagChange,
+		Payload:       map[string]any{"key": flag.Key, "action": "rules_updated"},
+		Timestamp:     time.Now().UTC(),
+	})
 
 	middleware.JSON(w, http.StatusOK, flagEnvResponseFromConfig(cfg))
 }

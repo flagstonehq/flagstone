@@ -9,8 +9,11 @@ import (
 	"github.com/flagstonehq/flagstone/internal/auth"
 	"github.com/flagstonehq/flagstone/internal/config"
 	"github.com/flagstonehq/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/internal/streaming"
 	"github.com/flagstonehq/flagstone/pkg/engine"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -36,14 +39,23 @@ type Server struct {
 	// Rate limiters per sensitive endpoint (in-process, per client IP).
 	loginLimiter   *middleware.IPRateLimiter
 	refreshLimiter *middleware.IPRateLimiter
+
+	hub *streaming.Hub
 }
 
 // NewServer creates a new API Server with the given dependencies.
-func NewServer(stores *storage.Stores, dbPool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger) *Server {
+func NewServer(stores *storage.Stores, dbPool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, rdb *redis.Client) *Server {
 	fake, err := auth.HashPassword("flagstone-timing-decoy", cfg.BcryptCost)
 	if err != nil {
 		logger.Warn("could not precompute fake password hash; login timing oracle defense disabled", zap.Error(err))
 	}
+	hub := streaming.NewHub(streaming.HubConfig{
+		Redis:        rdb,
+		PerAPIKeyCap: 10,
+		Logger:       logger,
+	})
+	go hub.Run(context.Background())
+
 	return &Server{
 		stores:           stores,
 		dbPool:           dbPool,
@@ -53,6 +65,7 @@ func NewServer(stores *storage.Stores, dbPool *pgxpool.Pool, cfg *config.Config,
 		fakePasswordHash: fake,
 		loginLimiter:     middleware.NewIPRateLimiter(5, time.Minute),
 		refreshLimiter:   middleware.NewIPRateLimiter(10, time.Minute),
+		hub:              hub,
 	}
 }
 
@@ -398,6 +411,16 @@ func (s *Server) Routes() http.Handler {
 	)
 	mux.Handle("POST /api/v1/evaluate/flags", recoverMW(evaluateBulkHandler))
 
+	streamHandler := streaming.NewHandler(s.hub, s.logger)
+	mux.Handle("GET /api/v1/stream", recoverMW(
+		s.withMiddleware(
+			http.HandlerFunc(streamHandler.ServeSSE),
+			middleware.RequestID(),
+			middleware.Logger(s.logger),
+			middleware.AuthAPIKey(s.stores),
+		),
+	))
+
 	return mux
 }
 
@@ -406,6 +429,40 @@ func (s *Server) withMiddleware(next http.Handler, mws ...func(http.Handler) htt
 		next = mws[i](next)
 	}
 	return next
+}
+
+// publishFlagChange publishes a flag_change event to all environments of a project.
+func (s *Server) publishFlagChange(ctx context.Context, projectID uuid.UUID, flagKey, action string) {
+	envs, err := s.stores.Environments.ListByProject(ctx, projectID)
+	if err != nil {
+		s.logger.Error("publish flag change: list environments", zap.Error(err))
+		return
+	}
+	for _, env := range envs {
+		s.hub.Publish(streaming.Event{
+			EnvironmentID: env.ID,
+			Type:          streaming.EventFlagChange,
+			Payload:       map[string]any{"key": flagKey, "action": action},
+			Timestamp:     time.Now().UTC(),
+		})
+	}
+}
+
+// publishSegmentChange publishes a segment_change event to all environments of a project.
+func (s *Server) publishSegmentChange(ctx context.Context, projectID uuid.UUID, segmentKey, action string) {
+	envs, err := s.stores.Environments.ListByProject(ctx, projectID)
+	if err != nil {
+		s.logger.Error("publish segment change: list environments", zap.Error(err))
+		return
+	}
+	for _, env := range envs {
+		s.hub.Publish(streaming.Event{
+			EnvironmentID: env.ID,
+			Type:          streaming.EventSegmentChange,
+			Payload:       map[string]any{"key": segmentKey, "action": action},
+			Timestamp:     time.Now().UTC(),
+		})
+	}
 }
 
 // StartCleanup launches a background goroutine that periodically deletes
