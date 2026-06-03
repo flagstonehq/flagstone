@@ -1,14 +1,16 @@
 name: CodeQL
 
-# Runs on push to main (after merge) and weekly on Monday morning.
-# Intentionally NOT on pull_request: CodeQL takes 10-15 min and would
-# slow down every PR. Results appear in the Security tab of this repo.
+# NOTE: CodeQL (GHAS) requires GitHub Advanced Security, which is only free
+# for public repos. This workflow is intentionally disabled while the repo is
+# private. Uncomment the triggers below when the repo is made public (M3).
+# Results will appear in Security → Code scanning alerts.
 on:
-  push:
-    branches: [main]
-    paths-ignore: ["**.md", "docs/**"]
-  schedule:
-    - cron: "0 8 * * 1"  # Monday 08:00 UTC
+  workflow_dispatch:  # manual only until the repo is public
+  # push:
+  #   branches: [main]
+  #   paths-ignore: ["**.md", "docs/**"]
+  # schedule:
+  #   - cron: "0 8 * * 1"  # Monday 08:00 UTC
 
 permissions:
   contents: read
