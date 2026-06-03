@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flagstonehq/flagstone/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thomas-vilte/flagstone/internal/storage"
 )
 
 func seedFlagWithEnv(t *testing.T) (projectSlug, flagKey, envSlug, token string) {
@@ -105,7 +105,7 @@ func TestUpdateFlagEnvironment_Success(t *testing.T) {
 
 	projectSlug, flagKey, envSlug, token := seedFlagWithEnv(t)
 
-	body := `{"enabled":true,"rules":[{"type":"equals","attribute":"country","value":"ar"}],"version":1}`
+	body := `{"enabled":true,"rules":[{"conditions":{"all":[{"attribute":"country","op":"eq","value":"ar"}]}}],"version":1}`
 	req := httptest.NewRequest(http.MethodPut,
 		"/api/v1/projects/"+projectSlug+"/flags/"+flagKey+"/environments/"+envSlug,
 		strings.NewReader(body))
@@ -161,4 +161,81 @@ func TestUpdateFlagEnvironment_FlagNotFound(t *testing.T) {
 	testServer.Routes().ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestToggleFlagEnvironment_Enable(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "projects", "tenant_members", "users", "tenants")
+
+	projectSlug, flagKey, envSlug, token := seedFlagWithEnv(t)
+
+	body := `{"enabled":true}`
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/projects/"+projectSlug+"/flags/"+flagKey+"/environments/"+envSlug,
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestToggleFlagEnvironment_Disable(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "projects", "tenant_members", "users", "tenants")
+
+	projectSlug, flagKey, envSlug, token := seedFlagWithEnv(t)
+
+	body := `{"enabled":true}`
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/projects/"+projectSlug+"/flags/"+flagKey+"/environments/"+envSlug,
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(authBearer(token))
+	testServer.Routes().ServeHTTP(httptest.NewRecorder(), req)
+
+	body = `{"enabled":false}`
+	req = httptest.NewRequest(http.MethodPatch,
+		"/api/v1/projects/"+projectSlug+"/flags/"+flagKey+"/environments/"+envSlug,
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestToggleFlagEnvironment_FlagNotFound(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "flag_environments", "environments", "flags", "projects", "tenant_members", "users", "tenants")
+
+	projectSlug, _, envSlug, token := seedFlagWithEnv(t)
+
+	body := `{"enabled":true}`
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/projects/"+projectSlug+"/flags/nonexistent/environments/"+envSlug,
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestToggleFlagEnvironment_NoAuth(t *testing.T) {
+	skipIfNoDB(t)
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/projects/any/flags/any/environments/any",
+		strings.NewReader(`{"enabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }

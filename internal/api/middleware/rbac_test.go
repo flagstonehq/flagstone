@@ -7,11 +7,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/flagstonehq/flagstone/internal/auth"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thomas-vilte/flagstone/internal/auth"
 )
 
 func TestRequireRole_allowed(t *testing.T) {

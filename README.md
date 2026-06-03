@@ -283,7 +283,7 @@ import (
     "context"
     "os"
 
-    "github.com/thomas-vilte/flagstone/pkg/sdk"
+    "github.com/flagstonehq/flagstone/pkg/sdk"
 )
 
 func main() {
@@ -449,7 +449,7 @@ flagstone/
 ### Quickstart (Docker — recommended)
 
 ```bash
-git clone https://github.com/thomas-vilte/flagstone
+git clone https://github.com/flagstonehq/flagstone
 cd flagstone
 docker compose up -d                        # postgres, redis, migrate, api, web
 docker compose --profile seed run --rm seed  # one-time demo data

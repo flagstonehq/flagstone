@@ -3,8 +3,8 @@ package middleware
 import (
 	"context"
 
+	"github.com/flagstonehq/flagstone/internal/auth"
 	"github.com/google/uuid"
-	"github.com/thomas-vilte/flagstone/internal/auth"
 	"go.uber.org/zap"
 )
 

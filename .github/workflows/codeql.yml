@@ -1,0 +1,20 @@
+name: CodeQL
+
+# Runs on push to main (after merge) and weekly on Monday morning.
+# Intentionally NOT on pull_request: CodeQL takes 10-15 min and would
+# slow down every PR. Results appear in the Security tab of this repo.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
+  schedule:
+    - cron: "0 8 * * 1"  # Monday 08:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    uses: flagstonehq/.github/.github/workflows/codeql.yml@main
+    with:
+      language: go

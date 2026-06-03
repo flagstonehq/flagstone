@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flagstonehq/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/storage"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thomas-vilte/flagstone/internal/auth"
-	"github.com/thomas-vilte/flagstone/internal/storage"
 )
 
 // crossTenantFixture builds two tenants with their own project, env, flag,

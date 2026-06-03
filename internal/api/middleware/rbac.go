@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/thomas-vilte/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/auth"
 )
 
 // RequireRole returns a middleware that restricts access to users whose role

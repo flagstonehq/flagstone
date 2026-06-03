@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flagstonehq/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/storage"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thomas-vilte/flagstone/internal/auth"
-	"github.com/thomas-vilte/flagstone/internal/storage"
 )
 
 func TestGetMe_Success(t *testing.T) {
@@ -463,4 +463,71 @@ func TestSetupStatus_Initialized(t *testing.T) {
 	err := json.NewDecoder(rec.Body).Decode(&resp)
 	require.NoError(t, err)
 	assert.True(t, resp.Initialized)
+}
+
+func seedUserWithSession(t *testing.T) (tenantID, userID uuid.UUID, token string, sessionID uuid.UUID) {
+	t.Helper()
+	tID, uID, _ := seedAuthUser(t)
+	rawToken, refreshHash, err := auth.GenerateRefreshToken(32)
+	require.NoError(t, err)
+	_ = rawToken
+	sess := &storage.Session{
+		UserID:      uID,
+		TenantID:    tID,
+		RefreshHash: refreshHash,
+		ExpiresAt:   time.Now().UTC().Add(24 * time.Hour),
+	}
+	require.NoError(t, testServer.stores.Sessions.Create(context.Background(), sess))
+	tok, err := auth.GenerateAccessToken(uID, tID, "admin", testServer.cfg.JWTSecret, testServer.cfg.AccessTokenTTL, sess.ID)
+	require.NoError(t, err)
+	return tID, uID, tok, sess.ID
+}
+
+func TestRevokeSession_InvalidUUID(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+
+	_, _, token, _ := seedUserWithSession(t)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/sessions/not-a-uuid", nil)
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+	testServer.Routes().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestListSessions_MultipleDevices(t *testing.T) {
+	skipIfNoDB(t)
+	truncateTables(t, "audit_log", "sessions", "tenant_members", "users", "tenants")
+
+	tenantID, userID, token, _ := seedUserWithSession(t)
+
+	_, refreshHash2, err := auth.GenerateRefreshToken(32)
+	require.NoError(t, err)
+	sess2 := &storage.Session{
+		UserID:      userID,
+		TenantID:    tenantID,
+		RefreshHash: refreshHash2,
+		ExpiresAt:   time.Now().UTC().Add(48 * time.Hour),
+	}
+	require.NoError(t, testServer.stores.Sessions.Create(context.Background(), sess2))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/sessions", nil)
+	req.Header.Set(authBearer(token))
+	rec := httptest.NewRecorder()
+	testServer.Routes().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp []sessionResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Len(t, resp, 2)
+
+	currentCount := 0
+	for _, s := range resp {
+		if s.IsCurrent {
+			currentCount++
+		}
+	}
+	assert.Equal(t, 1, currentCount, "exactly one session should be marked current")
 }

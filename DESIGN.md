@@ -1642,7 +1642,7 @@ flagstone/
 
 ```bash
 # Download the canonical compose file
-curl -O https://raw.githubusercontent.com/thomas-vilte/flagstone/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/flagstonehq/flagstone/main/docker-compose.yml
 
 # Generate a strong JWT secret and DB password
 cat > .env <<EOF

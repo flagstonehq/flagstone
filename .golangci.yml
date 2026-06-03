@@ -16,6 +16,15 @@ linters:
     - misspell
     - whitespace
     - gosec
+    - errorlint     # correct error wrapping/comparison (%w, errors.Is/As)
+    - containedctx  # detect context.Context stored in structs
+    - unconvert     # remove redundant type conversions
+    - wastedassign  # detect assignments never used
+    - makezero      # catch append to a non-zero-length slice made with make
+    - errname       # sentinel errors are Err*, error types are *Error
+    - bidichk       # dangerous unicode bidi sequences
+    - asciicheck    # non-ASCII identifiers
+    - predeclared   # shadowing Go predeclared identifiers
 
   settings:
     revive:

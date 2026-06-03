@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/flagstonehq/flagstone/internal/api"
+	"github.com/flagstonehq/flagstone/internal/config"
+	"github.com/flagstonehq/flagstone/internal/storage"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
-	"github.com/thomas-vilte/flagstone/internal/api"
-	"github.com/thomas-vilte/flagstone/internal/config"
-	"github.com/thomas-vilte/flagstone/internal/storage"
 	"go.uber.org/zap"
 )
 

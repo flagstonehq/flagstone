@@ -6,11 +6,11 @@ import (
 	"os"
 	"testing"
 
+	"github.com/flagstonehq/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/internal/testutil/pgtest"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
-	"github.com/thomas-vilte/flagstone/internal/storage"
-	"github.com/thomas-vilte/flagstone/internal/testutil/pgtest"
 )
 
 var testStores *storage.Stores
@@ -22,6 +22,7 @@ func TestMain(m *testing.M) {
 	var cleanup func()
 	if !testing.Short() {
 		pool, c, err := pgtest.Setup(context.Background(), "flagstone_test_middleware", "../../../migrations")
+		pgtest.RequireInCI(err)
 		if err == nil {
 			testPool = pool
 			cleanup = c

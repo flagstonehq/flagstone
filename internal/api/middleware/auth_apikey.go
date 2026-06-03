@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/flagstonehq/flagstone/internal/auth"
+	"github.com/flagstonehq/flagstone/internal/storage"
 	"github.com/google/uuid"
-	"github.com/thomas-vilte/flagstone/internal/auth"
-	"github.com/thomas-vilte/flagstone/internal/storage"
 )
 
 // AuthAPIKey validates a Bearer API key by computing its SHA-256 hash and

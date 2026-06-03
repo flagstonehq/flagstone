@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/thomas-vilte/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/internal/storage"
 )
 
 // ErrorResponse is the standard error envelope returned on non-2xx responses.
