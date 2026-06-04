@@ -45,11 +45,17 @@ func New(opts ...Option) (*Client, error) {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+
+	if cfg.bootstrapErr != nil {
+		return nil, cfg.bootstrapErr
+	}
+
 	cfg.defaults()
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	return &Client{
+
+	c := &Client{
 		opts:          cfg,
 		engine:        engine.New(cfg.logger),
 		cache:         newSnapshotCache(),
@@ -57,7 +63,16 @@ func New(opts ...Option) (*Client, error) {
 		refreshSignal: make(chan struct{}, 1),
 		started:       make(chan struct{}),
 		done:          make(chan struct{}),
-	}, nil
+	}
+
+	if len(cfg.bootstrap) > 0 {
+		var resp snapshotResponse
+		if err := json.Unmarshal(cfg.bootstrap, &resp); err != nil {
+			return nil, fmt.Errorf("sdk: invalid bootstrap JSON: %w", err)
+		}
+		c.cache.store(resp.toSnapshot())
+	}
+	return c, nil
 }
 
 // Start performs the initial snapshot fetch (blocking, using the given
@@ -69,12 +84,13 @@ func New(opts ...Option) (*Client, error) {
 // is called, whichever happens first.
 func (c *Client) Start(ctx context.Context) error {
 	c.startOnce.Do(func() {
+		if c.opts.offline {
+			c.startErr = nil
+			close(c.started)
+			return
+		}
 		c.stream.onFlagChange = c.signalRefresh
 		c.stream.onSegmentChange = c.signalRefresh
-
-		// runCtx drives the background loops. As a child of the caller's
-		// ctx, it is cancelled automatically when the caller cancels ctx;
-		// the goroutine below also cancels it when Close closes c.done.
 		runCtx, cancel := context.WithCancel(ctx)
 		go func() {
 			select {
@@ -83,9 +99,6 @@ func (c *Client) Start(ctx context.Context) error {
 			case <-runCtx.Done():
 			}
 		}()
-
-		// The initial fetch uses the caller's ctx (the caller is blocking
-		// on it), so Close does not abort it mid-flight.
 		snap, err := c.refetch(ctx)
 		if err == nil {
 			c.cache.store(snap)

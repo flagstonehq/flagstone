@@ -2,7 +2,10 @@ package sdk
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"go.uber.org/zap"
@@ -12,11 +15,14 @@ import (
 type Option func(*clientOptions)
 
 type clientOptions struct {
-	endpoint   string
-	apiKey     string
-	cacheTTL   time.Duration
-	logger     *zap.Logger
-	httpClient *http.Client
+	endpoint     string
+	apiKey       string
+	cacheTTL     time.Duration
+	logger       *zap.Logger
+	httpClient   *http.Client
+	offline      bool
+	bootstrap    []byte
+	bootstrapErr error
 }
 
 const (
@@ -51,6 +57,52 @@ func WithHTTPClient(c *http.Client) Option {
 	return func(o *clientOptions) { o.httpClient = c }
 }
 
+// WithOffline puts the client in offline mode: New succeeds without an
+// endpoint, Start is a no-op, and evaluations always return the supplied
+// default with ReasonDefault. Useful for tests and SSR.
+func WithOffline(v bool) Option {
+	return func(o *clientOptions) { o.offline = v }
+}
+
+// WithBootstrap pre-loads the client with a raw snapshot JSON (the exact
+// body returned by GET /api/v1/sdk/snapshot). The client can serve
+// evaluations immediately, before Start is called or the network is
+// reached.
+func WithBootstrap(json []byte) Option {
+	return func(o *clientOptions) { o.bootstrap = json }
+}
+
+// WithBootstrapReader is the io.Reader equivalent of WithBootstrap.
+func WithBootstrapReader(r io.Reader) Option {
+	return func(o *clientOptions) {
+		data, err := io.ReadAll(r)
+		if err != nil {
+			o.bootstrapErr = fmt.Errorf("sdk: WithBootstrapReader: %w", err)
+			return
+		}
+		o.bootstrap = data
+	}
+}
+
+// WithBootstrapFile loads bootstrap data from path. A missing file is a
+// warning, not a fatal error — the SDK starts and tries the network.
+func WithBootstrapFile(path string) Option {
+	return func(o *clientOptions) {
+		data, err := os.ReadFile(path) //nolint:gosec // path is caller-supplied by design
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// Missing file is a warning, not fatal: the SDK starts and
+				// tries the network. We can't log here — the logger is set
+				// by defaults(), which runs after options are applied.
+				return
+			}
+			o.bootstrapErr = fmt.Errorf("sdk: read bootstrap file %q: %w", path, err)
+			return
+		}
+		o.bootstrap = data
+	}
+}
+
 func (o *clientOptions) defaults() {
 	if o.cacheTTL == 0 {
 		o.cacheTTL = defaultCacheTTL
@@ -64,6 +116,9 @@ func (o *clientOptions) defaults() {
 }
 
 func (o *clientOptions) validate() error {
+	if o.offline {
+		return nil
+	}
 	if o.endpoint == "" {
 		return errors.New("sdk: WithEndpoint is required")
 	}

@@ -53,8 +53,12 @@ type EvaluationDetail struct {
 // typed *Detail wrappers.
 func (c *Client) evalDetail(key string, evalCtx map[string]any) EvaluationDetail {
 	snap := c.cache.get()
-	// A zero fetchedAt means no snapshot has ever been loaded (the cache
-	// is seeded with an empty one). Point the caller at Start().
+	if c.opts.offline && snap.fetchedAt.IsZero() {
+		return EvaluationDetail{
+			Reason:    ReasonDefault,
+			RuleIndex: -1,
+		}
+	}
 	if snap.fetchedAt.IsZero() {
 		c.signalRefresh()
 		return EvaluationDetail{
