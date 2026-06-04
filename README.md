@@ -298,10 +298,12 @@ func main() {
     defer func() { _ = client.Close() }()
 
     ctx := context.Background()
-    go func() { _ = client.Start(ctx) }() // subscribes to SSE for live updates
+    _ = client.Start(ctx) // loads the snapshot, then subscribes to SSE for live updates
 
     http.HandleFunc("/checkout", func(w http.ResponseWriter, r *http.Request) {
-        enabled, _ := client.Bool(r.Context(), "new-checkout", map[string]any{
+        // Safe-default API: pass the value to serve if the flag is missing
+        // or not loaded. Never returns an error, never blocks on the network.
+        enabled := client.Bool(r.Context(), "new-checkout", false, map[string]any{
             "user_id": r.URL.Query().Get("user_id"),
             "plan":    "premium",
         })
