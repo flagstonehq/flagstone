@@ -36,7 +36,7 @@ func BenchmarkBool_Cached(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _ = c.Bool(context.Background(), "flag_0", evalCtx)
+			_ = c.Bool(context.Background(), "flag_0", false, evalCtx)
 		}
 	})
 }
@@ -47,7 +47,9 @@ func BenchmarkBool_Cold(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		c, _ := New(WithEndpoint(srv.URL), WithAPIKey("k"))
-		_, _ = c.Bool(context.Background(), "new-checkout", evalCtx)
+		_ = c.Start(context.Background())
+		_ = c.Bool(context.Background(), "new-checkout", false, evalCtx)
+		_ = c.Close()
 	}
 }
 
@@ -103,7 +105,7 @@ func BenchmarkInvalidate_ConcurrentReaders(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _ = c.Bool(context.Background(), "flag_0", evalCtx)
+			_ = c.Bool(context.Background(), "flag_0", false, evalCtx)
 		}
 	})
 	b.StopTimer()

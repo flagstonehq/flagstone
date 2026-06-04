@@ -47,14 +47,12 @@ func run(endpoint, apiKey string) error {
 			http.Error(w, `{"error":"user_id is required"}`, http.StatusBadRequest)
 			return
 		}
-		enabled, err := client.Bool(r.Context(), "new-checkout", map[string]any{
+		// Safe-default API: on any problem (flag missing, not loaded yet)
+		// this returns the supplied default (false) — never an error.
+		enabled := client.Bool(r.Context(), "new-checkout", false, map[string]any{
 			"user_id": userID,
 			"country": country,
 		})
-		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
-			return
-		}
 		checkout := "v1"
 		if enabled {
 			checkout = "v2"

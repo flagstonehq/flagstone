@@ -119,13 +119,11 @@ func TestBool_CachesAndReusesWithoutHTTPCall(t *testing.T) {
 	defer cancel()
 	require.NoError(t, c.Start(ctx))
 
-	got, err := c.Bool(ctx, "new-checkout", map[string]any{"user_id": "42"})
-	require.NoError(t, err)
+	got := c.Bool(ctx, "new-checkout", false, map[string]any{"user_id": "42"})
 	assert.False(t, got, "default_value is false, no rules match")
 	assert.Equal(t, int32(1), atomic.LoadInt32(calls), "Start fetched snapshot")
 
-	got2, err := c.Bool(ctx, "new-checkout", map[string]any{"user_id": "42"})
-	require.NoError(t, err)
+	got2 := c.Bool(ctx, "new-checkout", false, map[string]any{"user_id": "42"})
 	assert.Equal(t, got, got2)
 	assert.Equal(t, int32(1), atomic.LoadInt32(calls), "second call must NOT re-fetch")
 }
@@ -138,12 +136,10 @@ func TestBool_RuleMatch(t *testing.T) {
 	defer cancel()
 	require.NoError(t, c.Start(ctx))
 
-	got, err := c.Bool(ctx, "premium-only", map[string]any{"plan": "premium"})
-	require.NoError(t, err)
+	got := c.Bool(ctx, "premium-only", false, map[string]any{"plan": "premium"})
 	assert.True(t, got, "rule matches plan=premium")
 
-	got, err = c.Bool(ctx, "premium-only", map[string]any{"plan": "free"})
-	require.NoError(t, err)
+	got = c.Bool(ctx, "premium-only", false, map[string]any{"plan": "free"})
 	assert.False(t, got, "rule does not match plan=free")
 }
 
@@ -155,8 +151,7 @@ func TestString(t *testing.T) {
 	defer cancel()
 	require.NoError(t, c.Start(ctx))
 
-	got, err := c.String(ctx, "banner-text", nil)
-	require.NoError(t, err)
+	got := c.String(ctx, "banner-text", "", nil)
 	assert.Equal(t, "hello", got)
 }
 
@@ -168,9 +163,10 @@ func TestString_TypeMismatch(t *testing.T) {
 	defer cancel()
 	require.NoError(t, c.Start(ctx))
 
-	_, err = c.String(ctx, "new-checkout", nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "is boolean, not string")
+	d := c.StringDetail(ctx, "new-checkout", "fallback", nil)
+	require.Error(t, d.Error)
+	assert.Contains(t, d.Error.Error(), "not string")
+	assert.Equal(t, "fallback", d.Value, "type mismatch returns the supplied default")
 }
 
 func TestAll(t *testing.T) {
@@ -230,8 +226,7 @@ func TestFlagChange_TriggersRefetchOnNextEval(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		got, err := c.Bool(ctx, "checkout", nil)
-		if err == nil && got {
+		if c.Bool(ctx, "checkout", false, nil) {
 			require.GreaterOrEqual(t, atomic.LoadInt32(&calls), int32(2),
 				"expected at least 2 snapshot fetches after flag_change")
 			return
@@ -346,8 +341,7 @@ func TestDoJSON_SendsBearerHeader(t *testing.T) {
 	defer cancel()
 	require.NoError(t, c.Start(ctx))
 
-	_, err = c.Bool(ctx, "new-checkout", nil)
-	require.NoError(t, err)
+	_ = c.Bool(ctx, "new-checkout", false, nil)
 	assert.Equal(t, "Bearer fs_live_xyz", gotAuth)
 }
 
@@ -381,7 +375,6 @@ func TestSnapshot_EndToEnd(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	require.NoError(t, c.Start(ctx))
-	got, err := c.Bool(ctx, "f1", nil)
-	require.NoError(t, err)
+	got := c.Bool(ctx, "f1", false, nil)
 	assert.True(t, got)
 }
