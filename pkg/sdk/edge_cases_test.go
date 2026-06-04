@@ -20,12 +20,15 @@ func TestEdge_FlagNotFound(t *testing.T) {
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	_, err = c.Bool(context.Background(), "this-flag-does-not-exist", nil)
-	if err == nil {
+	d := c.BoolDetail(context.Background(), "this-flag-does-not-exist", false, nil)
+	if d.Error == nil {
 		t.Fatal("expected error for missing flag")
 	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Fatalf("expected 'not found' error, got %v", err)
+	if d.Reason != ReasonFlagNotFound {
+		t.Fatalf("expected ReasonFlagNotFound, got %v", d.Reason)
+	}
+	if !strings.Contains(d.Error.Error(), "not found") {
+		t.Fatalf("expected 'not found' error, got %v", d.Error)
 	}
 }
 
@@ -35,12 +38,15 @@ func TestEdge_TypeMismatch(t *testing.T) {
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	_, err := c.String(context.Background(), "new-checkout", nil)
-	if err == nil {
+	d := c.StringDetail(context.Background(), "new-checkout", "fallback", nil)
+	if d.Error == nil {
 		t.Fatal("expected type mismatch error")
 	}
-	if !strings.Contains(err.Error(), "not string") {
-		t.Fatalf("expected type error mentioning 'not string', got %v", err)
+	if !strings.Contains(d.Error.Error(), "not string") {
+		t.Fatalf("expected type error mentioning 'not string', got %v", d.Error)
+	}
+	if d.Value != "fallback" {
+		t.Fatalf("type mismatch should return the default, got %v", d.Value)
 	}
 }
 
@@ -52,10 +58,9 @@ func TestEdge_ContextCancelled(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	v, err := c.Bool(ctx, "new-checkout", map[string]any{"user_id": "42"})
-	if err != nil {
-		t.Fatalf("expected success even with cancelled ctx, got %v", err)
-	}
+	// Eval is pure in-memory; a cancelled ctx must not turn it into an
+	// error or a block — it returns the resolved value immediately.
+	v := c.Bool(ctx, "new-checkout", false, map[string]any{"user_id": "42"})
 	_ = v
 }
 
@@ -67,12 +72,12 @@ func TestEdge_StartCancelledCtx(t *testing.T) {
 	if err := c.Start(ctx); err == nil {
 		t.Fatal("expected Start to fail with cancelled ctx")
 	}
-	_, err := c.Bool(context.Background(), "new-checkout", nil)
-	if err == nil {
+	d := c.BoolDetail(context.Background(), "new-checkout", false, nil)
+	if d.Error == nil {
 		t.Fatal("expected error when snapshot never loaded")
 	}
-	if !strings.Contains(err.Error(), "not loaded") {
-		t.Fatalf("expected 'not loaded' error, got %v", err)
+	if !strings.Contains(d.Error.Error(), "not loaded") {
+		t.Fatalf("expected 'not loaded' error, got %v", d.Error)
 	}
 }
 
@@ -199,16 +204,23 @@ func TestEdge_AllEmpty(t *testing.T) {
 func TestEdge_EvalBeforeStart(t *testing.T) {
 	srv, _ := newTestServer(t, nil)
 	c, _ := New(WithEndpoint(srv.URL), WithAPIKey("k"))
+
+	// Happy path: before Start the snapshot is empty, so Bool returns the
+	// supplied default immediately — no error, no network round-trip.
 	start := time.Now()
-	_, err := c.Bool(context.Background(), "new-checkout", nil)
+	got := c.Bool(context.Background(), "new-checkout", true, nil)
 	elapsed := time.Since(start)
-	if err == nil {
-		t.Fatal("expected error before Start")
-	}
-	if !strings.Contains(err.Error(), "not loaded") {
-		t.Fatalf("expected 'not loaded' error pointing at Start(), got %v", err)
+	if !got {
+		t.Fatal("Bool before Start should return the supplied default (true)")
 	}
 	if elapsed > 50*time.Millisecond {
 		t.Fatalf("Bool before Start took %v; expected immediate return", elapsed)
+	}
+
+	// Detail path: the reason is surfaced so the caller can tell apart
+	// "not started" from "flag absent".
+	d := c.BoolDetail(context.Background(), "new-checkout", true, nil)
+	if d.Error == nil || !strings.Contains(d.Error.Error(), "not loaded") {
+		t.Fatalf("expected 'not loaded' error pointing at Start(), got %v", d.Error)
 	}
 }

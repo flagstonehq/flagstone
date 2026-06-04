@@ -10,12 +10,18 @@
 //	defer client.Close()
 //
 //	ctx := context.Background()
-//	go client.Start(ctx)  // subscribes to SSE for live updates
+//	_ = client.Start(ctx)  // loads the snapshot, then subscribes to SSE
 //
-//	enabled, _ := client.Bool(ctx, "new-checkout", map[string]any{
-//	    "user_id": 42,
+//	// Safe-default API: pass the value to serve if the flag is missing,
+//	// the wrong type, or not loaded yet. Never returns an error or blocks.
+//	enabled := client.Bool(ctx, "new-checkout", false, map[string]any{
+//	    "user_id": "42",
 //	    "country": "AR",
 //	})
+//
+//	// Use BoolDetail when you also want the reason or error:
+//	d := client.BoolDetail(ctx, "new-checkout", false, nil)
+//	_ = d.Reason // RULE_MATCH, DEFAULT, FLAG_NOT_FOUND, ...
 //
 // # Stability
 //

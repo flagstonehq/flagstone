@@ -107,50 +107,27 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// Bool evaluates a boolean flag. Returns the engine error if the flag
-// is not found, the type does not match, or the snapshot has not yet
-// been loaded (call Start first).
-func (c *Client) Bool(ctx context.Context, key string, evalCtx map[string]any) (bool, error) {
-	v, err := c.eval(ctx, key, evalCtx, "boolean")
-	if err != nil {
-		return false, err
-	}
-	b, ok := v.(bool)
-	if !ok {
-		return false, fmt.Errorf("sdk: flag %q is not boolean (got %T)", key, v)
-	}
-	return b, nil
+// Bool evaluates a boolean flag. It returns def if the flag is missing,
+// is not boolean, or the snapshot has not been loaded yet. It never
+// returns an error and never blocks on the network — use BoolDetail when
+// you need the reason or error.
+func (c *Client) Bool(ctx context.Context, key string, def bool, evalCtx map[string]any) bool {
+	return c.BoolDetail(ctx, key, def, evalCtx).Value.(bool)
 }
 
-// String evaluates a string flag.
-func (c *Client) String(ctx context.Context, key string, evalCtx map[string]any) (string, error) {
-	v, err := c.eval(ctx, key, evalCtx, "string")
-	if err != nil {
-		return "", err
-	}
-	s, ok := v.(string)
-	if !ok {
-		return "", fmt.Errorf("sdk: flag %q is not string (got %T)", key, v)
-	}
-	return s, nil
+// String evaluates a string flag, returning def on any error.
+func (c *Client) String(ctx context.Context, key, def string, evalCtx map[string]any) string {
+	return c.StringDetail(ctx, key, def, evalCtx).Value.(string)
 }
 
-// Number evaluates a numeric flag.
-func (c *Client) Number(ctx context.Context, key string, evalCtx map[string]any) (float64, error) {
-	v, err := c.eval(ctx, key, evalCtx, "number")
-	if err != nil {
-		return 0, err
-	}
-	n, ok := v.(float64)
-	if !ok {
-		return 0, fmt.Errorf("sdk: flag %q is not number (got %T)", key, v)
-	}
-	return n, nil
+// Number evaluates a numeric flag, returning def on any error.
+func (c *Client) Number(ctx context.Context, key string, def float64, evalCtx map[string]any) float64 {
+	return c.NumberDetail(ctx, key, def, evalCtx).Value.(float64)
 }
 
-// JSON evaluates a flag whose value can be any JSON structure.
-func (c *Client) JSON(ctx context.Context, key string, evalCtx map[string]any) (any, error) {
-	return c.eval(ctx, key, evalCtx, "")
+// JSON evaluates a flag of any JSON type, returning def on any error.
+func (c *Client) JSON(ctx context.Context, key string, def any, evalCtx map[string]any) any {
+	return c.JSONDetail(ctx, key, def, evalCtx).Value
 }
 
 // All evaluates every flag in the current snapshot. If no snapshot has
@@ -176,37 +153,9 @@ type Value struct {
 	Reason engine.Reason
 }
 
-// eval is the lock-free hot path. It loads the current snapshot
-// atomically and runs the engine in memory. If the snapshot has not
-// yet been loaded, it signals the refresh loop and returns a "not
-// found" error.
-func (c *Client) eval(_ context.Context, key string, evalCtx map[string]any, wantType string) (any, error) {
-	snap := c.cache.get()
-	// A zero fetchedAt means no snapshot has ever been loaded (the cache
-	// is seeded with an empty one). Distinguish "not started yet" from
-	// "flag genuinely absent" so the error points at the real cause.
-	if snap.fetchedAt.IsZero() {
-		c.signalRefresh()
-		return nil, fmt.Errorf("sdk: snapshot not loaded, call Start() first")
-	}
-	fc, ok := snap.flags[key]
-	if !ok {
-		return nil, fmt.Errorf("sdk: flag %q not found", key)
-	}
-	if wantType != "" && fc.FlagType != wantType {
-		return nil, fmt.Errorf("sdk: flag %q is %s, not %s", key, fc.FlagType, wantType)
-	}
-	result := c.engine.Evaluate(engine.EvaluateRequest{
-		FlagConfig: fc,
-		Segments:   snap.segments,
-		Context:    evalCtx,
-	})
-	return result.Value, nil
-}
-
 // signalRefresh is non-blocking. It is called by the SSE stream when a
-// flag_change / segment_change / resync event arrives, and by eval when
-// it sees an empty snapshot.
+// flag_change / segment_change / resync event arrives, and by evalDetail
+// when it sees an empty snapshot.
 func (c *Client) signalRefresh() {
 	select {
 	case c.refreshSignal <- struct{}{}:
