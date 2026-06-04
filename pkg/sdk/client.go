@@ -32,7 +32,27 @@ type Client struct {
 	startErr      error
 	started       chan struct{}
 	done          chan struct{}
+	status        *clientStatus
 	closeOnce     sync.Once
+}
+
+// Initialized returns true once the SDK has a known state. It is a
+// convenience wrapper around Status().Initialized().
+func (c *Client) Initialized() bool {
+	return c.status.Initialized()
+}
+
+// Status returns the StatusProvider for this Client. The implementation
+// is safe for concurrent use by any number of goroutines.
+func (c *Client) Status() StatusProvider {
+	return c.status
+}
+
+// AddOnStatusChange registers a callback that fires on every state
+// transition. The callback is called from the refresh goroutine and must
+// not block. Useful for emitting metrics or wiring health checks.
+func (c *Client) AddOnStatusChange(cb func(State)) {
+	c.status.addCallback(cb)
 }
 
 // New constructs a Client. Endpoint and APIKey are required (returned as
@@ -63,6 +83,11 @@ func New(opts ...Option) (*Client, error) {
 		refreshSignal: make(chan struct{}, 1),
 		started:       make(chan struct{}),
 		done:          make(chan struct{}),
+		status:        newClientStatus(),
+	}
+
+	for _, cb := range cfg.onStatusChange {
+		c.status.addCallback(cb)
 	}
 
 	if len(cfg.bootstrap) > 0 {
@@ -71,6 +96,10 @@ func New(opts ...Option) (*Client, error) {
 			return nil, fmt.Errorf("sdk: invalid bootstrap JSON: %w", err)
 		}
 		c.cache.store(resp.toSnapshot())
+		c.status.transition(StateConnected)
+	}
+	if c.opts.offline {
+		c.status.transition(StateOffline)
 	}
 	return c, nil
 }
@@ -100,8 +129,18 @@ func (c *Client) Start(ctx context.Context) error {
 			}
 		}()
 		snap, err := c.refetch(ctx)
-		if err == nil {
+		switch {
+		case err == nil:
 			c.cache.store(snap)
+			c.status.setLastUpdated(time.Now())
+			c.status.setLastError(nil)
+			c.status.transition(StateConnected)
+		case c.cache.get().fetchedAt.IsZero():
+			c.status.setLastError(err)
+			c.status.transition(StateError)
+		default:
+			c.status.setLastError(err)
+			c.status.transition(StateStale)
 		}
 		c.startErr = err
 		close(c.started)
@@ -196,8 +235,17 @@ func (c *Client) refreshLoop(ctx context.Context) {
 func (c *Client) doRefresh(ctx context.Context) {
 	if snap, err := c.refetch(ctx); err != nil {
 		c.opts.logger.Warn("snapshot refresh failed", zap.Error(err))
+		c.status.setLastError(err)
+		if c.cache.get().fetchedAt.IsZero() {
+			c.status.transition(StateError)
+		} else {
+			c.status.transition(StateStale)
+		}
 	} else {
 		c.cache.store(snap)
+		c.status.setLastUpdated(time.Now())
+		c.status.setLastError(nil)
+		c.status.transition(StateConnected)
 	}
 }
 

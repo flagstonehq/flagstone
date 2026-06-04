@@ -15,14 +15,15 @@ import (
 type Option func(*clientOptions)
 
 type clientOptions struct {
-	endpoint     string
-	apiKey       string
-	cacheTTL     time.Duration
-	logger       *zap.Logger
-	httpClient   *http.Client
-	offline      bool
-	bootstrap    []byte
-	bootstrapErr error
+	endpoint       string
+	apiKey         string
+	cacheTTL       time.Duration
+	logger         *zap.Logger
+	httpClient     *http.Client
+	offline        bool
+	bootstrap      []byte
+	bootstrapErr   error
+	onStatusChange []func(State)
 }
 
 const (
@@ -100,6 +101,14 @@ func WithBootstrapFile(path string) Option {
 			return
 		}
 		o.bootstrap = data
+	}
+}
+
+// WithOnStatusChange registers a callback that fires every time the
+// client's connectivity state changes. Multiple callbacks are supported.
+func WithOnStatusChange(cb func(State)) Option {
+	return func(o *clientOptions) {
+		o.onStatusChange = append(o.onStatusChange, cb)
 	}
 }
 
