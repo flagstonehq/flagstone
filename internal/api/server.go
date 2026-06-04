@@ -421,6 +421,14 @@ func (s *Server) Routes() http.Handler {
 		),
 	))
 
+	sdkSnapshotHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleSDKSnapshot),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.AuthAPIKey(s.stores),
+	)
+	mux.Handle("GET /api/v1/sdk/snapshot", recoverMW(sdkSnapshotHandler))
+
 	return mux
 }
 

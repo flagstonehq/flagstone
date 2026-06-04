@@ -36,36 +36,36 @@ type EvaluateRequest struct {
 // FlagConfig holds all data needed to evaluate a single feature flag in a
 // given environment. It is populated from storage by the evaluate handler.
 type FlagConfig struct {
-	Key                     string
-	Enabled                 bool
-	FlagType                string
-	DefaultValue            any
-	EnvironmentDefaultValue any
-	HasEnvironmentDefault   bool
-	Version                 int64
-	Rules                   []Rule
+	Key                     string `json:"key"`
+	Enabled                 bool   `json:"enabled"`
+	FlagType                string `json:"flag_type"`
+	DefaultValue            any    `json:"default_value"`
+	EnvironmentDefaultValue any    `json:"environment_default_value,omitempty"`
+	HasEnvironmentDefault   bool   `json:"has_environment_default"`
+	Version                 int64  `json:"version"`
+	Rules                   []Rule `json:"rules"`
 }
 
 // Rule is a single targeting rule. Rules are evaluated in order; the first
 // rule whose conditions match (and whose rollout bucket applies) wins.
 type Rule struct {
-	Conditions ConditionNode
-	Rollout    *RolloutConfig // nil = 100% of matched users
-	Value      any            // nil defaults to true for boolean flags
+	Conditions ConditionNode  `json:"conditions"`
+	Rollout    *RolloutConfig `json:"rollout,omitempty"` // nil = 100% of matched users
+	Value      any            `json:"value,omitempty"`   // nil defaults to true for boolean flags
 }
 
 // RolloutConfig controls gradual rollout via consistent hashing on user_id.
 type RolloutConfig struct {
-	Percentage int    // 0–100
-	Seed       string // defaults to the flag key when empty
+	Percentage int    `json:"percentage"`     // 0–100
+	Seed       string `json:"seed,omitempty"` // defaults to the flag key when empty
 }
 
 // Segment is a reusable named condition set that flag rules can reference
 // via the "segment" operator. The engine evaluates segment conditions
 // recursively and detects cycles via a visited set.
 type Segment struct {
-	Key        string
-	Conditions ConditionNode
+	Key        string        `json:"key"`
+	Conditions ConditionNode `json:"conditions"`
 }
 
 // ConditionNode is a node in a boolean expression tree (all/any/not/leaf).
@@ -73,12 +73,12 @@ type Segment struct {
 // should be set; the engine short-circuits on the first matching branch.
 type ConditionNode struct {
 	// Leaf fields — used when the node is a single condition.
-	Attribute *string
-	Op        *string
-	Value     any
+	Attribute *string `json:"attribute,omitempty"`
+	Op        *string `json:"op,omitempty"`
+	Value     any     `json:"value,omitempty"`
 
 	// Composite fields — used when the node groups other conditions.
-	All []ConditionNode // AND — true when all children are true
-	Any []ConditionNode // OR  — true when any child is true
-	Not *ConditionNode  // NOT — inverts the single child
+	All []ConditionNode `json:"all,omitempty"` // AND — true when all children are true
+	Any []ConditionNode `json:"any,omitempty"` // OR  — true when any child is true
+	Not *ConditionNode  `json:"not,omitempty"` // NOT — inverts the single child
 }
