@@ -24,6 +24,7 @@ type clientOptions struct {
 	bootstrap      []byte
 	bootstrapErr   error
 	onStatusChange []func(State)
+	store          DataStore
 }
 
 const (
@@ -109,6 +110,17 @@ func WithBootstrapFile(path string) Option {
 func WithOnStatusChange(cb func(State)) Option {
 	return func(o *clientOptions) {
 		o.onStatusChange = append(o.onStatusChange, cb)
+	}
+}
+
+// WithDataStore sets a persistent DataStore. When set, the SDK loads
+// the snapshot from the store on startup (in Start, before the first
+// network fetch) and saves every successful fetch result to it.
+// If unset, no persistence layer runs and behavior is identical to
+// previous versions.
+func WithDataStore(ds DataStore) Option {
+	return func(o *clientOptions) {
+		o.store = ds
 	}
 }
 

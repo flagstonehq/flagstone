@@ -1,7 +1,6 @@
 package sdk
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -34,6 +33,7 @@ type Client struct {
 	done          chan struct{}
 	status        *clientStatus
 	closeOnce     sync.Once
+	store         DataStore
 }
 
 // Initialized returns true once the SDK has a known state. It is a
@@ -84,6 +84,7 @@ func New(opts ...Option) (*Client, error) {
 		started:       make(chan struct{}),
 		done:          make(chan struct{}),
 		status:        newClientStatus(),
+		store:         cfg.store,
 	}
 
 	for _, cb := range cfg.onStatusChange {
@@ -128,13 +129,30 @@ func (c *Client) Start(ctx context.Context) error {
 			case <-runCtx.Done():
 			}
 		}()
-		snap, err := c.refetch(ctx)
+
+		if c.store != nil {
+			if raw, err := c.store.Load(ctx); err != nil {
+				c.opts.logger.Warn("datastore load failed", zap.Error(err))
+			} else if raw != nil {
+				var sr snapshotResponse
+				if err := json.Unmarshal(raw, &sr); err != nil {
+					c.opts.logger.Warn("datastore snapshot invalid", zap.Error(err))
+				} else {
+					c.cache.store(sr.toSnapshot())
+				}
+			}
+		}
+
+		snap, raw, err := c.refetchRaw(ctx)
 		switch {
 		case err == nil:
 			c.cache.store(snap)
 			c.status.setLastUpdated(time.Now())
 			c.status.setLastError(nil)
 			c.status.transition(StateConnected)
+			if c.store != nil {
+				_ = c.store.Save(ctx, raw)
+			}
 		case c.cache.get().fetchedAt.IsZero():
 			c.status.setLastError(err)
 			c.status.transition(StateError)
@@ -156,6 +174,9 @@ func (c *Client) Start(ctx context.Context) error {
 // after Close — they serve the last snapshot from memory.
 func (c *Client) Close() error {
 	c.closeOnce.Do(func() { close(c.done) })
+	if c.store != nil {
+		return c.store.Close()
+	}
 	return nil
 }
 
@@ -233,7 +254,8 @@ func (c *Client) refreshLoop(ctx context.Context) {
 }
 
 func (c *Client) doRefresh(ctx context.Context) {
-	if snap, err := c.refetch(ctx); err != nil {
+	snap, raw, err := c.refetchRaw(ctx)
+	if err != nil {
 		c.opts.logger.Warn("snapshot refresh failed", zap.Error(err))
 		c.status.setLastError(err)
 		if c.cache.get().fetchedAt.IsZero() {
@@ -241,56 +263,42 @@ func (c *Client) doRefresh(ctx context.Context) {
 		} else {
 			c.status.transition(StateStale)
 		}
-	} else {
-		c.cache.store(snap)
-		c.status.setLastUpdated(time.Now())
-		c.status.setLastError(nil)
-		c.status.transition(StateConnected)
+		return
 	}
-}
-
-// refetch performs one HTTP GET against /api/v1/sdk/snapshot. The
-// returned *snapshot is a fresh allocation; the caller may store it
-// without copying.
-func (c *Client) refetch(ctx context.Context) (*snapshot, error) {
-	var resp snapshotResponse
-	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/sdk/snapshot", nil, &resp); err != nil {
-		return nil, err
-	}
-	return resp.toSnapshot(), nil
-}
-
-func (c *Client) doJSON(ctx context.Context, method, path string, body, out any) error {
-	var reqBody io.Reader
-	if body != nil {
-		buf, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("marshal: %w", err)
+	c.cache.store(snap)
+	c.status.setLastUpdated(time.Now())
+	c.status.setLastError(nil)
+	c.status.transition(StateConnected)
+	if c.store != nil {
+		if saveErr := c.store.Save(ctx, raw); saveErr != nil {
+			c.opts.logger.Warn("datastore save failed", zap.Error(saveErr))
 		}
-		reqBody = bytes.NewReader(buf)
 	}
-	req, err := http.NewRequestWithContext(ctx, method,
-		strings.TrimRight(c.opts.endpoint, "/")+path, reqBody)
+}
+
+func (c *Client) refetchRaw(ctx context.Context) (*snapshot, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		strings.TrimRight(c.opts.endpoint, "/")+"/api/v1/sdk/snapshot", http.NoBody)
 	if err != nil {
-		return fmt.Errorf("new request: %w", err)
+		return nil, nil, fmt.Errorf("sdk: refetch raw: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.opts.apiKey)
 	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
 	resp, err := c.opts.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("do: %w", err)
+		return nil, nil, fmt.Errorf("sdk: refetch: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("http %d: %s", resp.StatusCode, resp.Status)
+		return nil, nil, fmt.Errorf("sdk: http %d: %s", resp.StatusCode, resp.Status)
 	}
-	if out != nil {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			return fmt.Errorf("decode: %w", err)
-		}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sdk: read body: %w", err)
 	}
-	return nil
+	var sr snapshotResponse
+	if err := json.Unmarshal(raw, &sr); err != nil {
+		return nil, raw, fmt.Errorf("sdk: decode snapshot: %w", err)
+	}
+	return sr.toSnapshot(), raw, nil
 }
