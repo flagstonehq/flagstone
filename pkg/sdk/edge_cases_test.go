@@ -224,3 +224,14 @@ func TestEdge_EvalBeforeStart(t *testing.T) {
 		t.Fatalf("expected 'not loaded' error pointing at Start(), got %v", d.Error)
 	}
 }
+
+func TestEdge_OfflineNoEndpoint(t *testing.T) {
+	c, err := New(WithOffline(true))
+	if err != nil {
+		t.Fatalf("expected New to succeed without endpoint when offline, got: %v", err)
+	}
+	val := c.Bool(context.Background(), "any-flag", true, nil)
+	if val != true {
+		t.Fatalf("expected true, got %v", val)
+	}
+}
