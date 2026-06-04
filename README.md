@@ -281,34 +281,44 @@ package main
 
 import (
     "context"
+    "net/http"
     "os"
 
     "github.com/flagstonehq/flagstone/pkg/sdk"
 )
 
 func main() {
-    client := sdk.New(sdk.Config{
-        ServerURL: "http://localhost:8080",
-        APIKey:    os.Getenv("FLAGSTONE_API_KEY"),
-    })
-    defer client.Close()
+    client, err := sdk.New(
+        sdk.WithEndpoint("http://localhost:8080"),
+        sdk.WithAPIKey(os.Getenv("FLAGSTONE_API_KEY")),
+    )
+    if err != nil {
+        panic(err)
+    }
+    defer func() { _ = client.Close() }()
 
-    user := sdk.User{
-        ID:    "user-12345",
-        Email: "thomas@company.com",
-        Attributes: map[string]any{
+    ctx := context.Background()
+    go func() { _ = client.Start(ctx) }() // subscribes to SSE for live updates
+
+    http.HandleFunc("/checkout", func(w http.ResponseWriter, r *http.Request) {
+        enabled, _ := client.Bool(r.Context(), "new-checkout", map[string]any{
+            "user_id": r.URL.Query().Get("user_id"),
             "plan":    "premium",
-            "country": "AR",
-        },
-    }
-
-    if client.IsEnabled(context.Background(), "new-checkout", user) {
-        renderNewCheckout()
-    } else {
-        renderClassicCheckout()
-    }
+        })
+        if enabled {
+            renderNewCheckout(w)
+        } else {
+            renderClassicCheckout(w)
+        }
+    })
+    _ = http.ListenAndServe(":9000", nil)
 }
 ```
+
+The SDK fetches a single snapshot of all flags and segments in your
+environment, caches it in memory, and re-fetches automatically when
+Flagstone pushes a `flag_change` or `segment_change` event over SSE.
+No more polling, no more stale flags.
 
 ## Authentication & Security
 

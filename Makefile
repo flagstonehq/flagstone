@@ -43,6 +43,14 @@ vet:
 test:
 	go test -race -short ./...
 
+# Same as test but with the integration tier (no -short). Use in CI / pre-release.
+test-race:
+	go test -race -count=1 ./...
+
+# Benchmarks for the SDK. Filters out non-benchmark output by default.
+bench:
+	go test -run=^$$ -bench=. -benchmem ./pkg/sdk/...
+
 # Integration tests. Packages run in parallel safely thanks to per-package
 # Postgres schema isolation in internal/testutil/pgtest — each package owns
 # its own schema and migrations run there.
