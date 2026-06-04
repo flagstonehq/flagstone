@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 
+## [v0.3.0] - 2026-06-04
+
+[v0.3.0]: https://github.com/flagstonehq/flagstone/compare/v0.2.0...v0.3.0
+
+We've introduced significant improvements to the Flagstone ecosystem, focusing on developer experience and system reliability. This release adds a new Go SDK, robust offline capabilities, and real-time event streaming to ensure your feature flags are always up-to-date and accessible.
+
+### 🚀 SDK & Developer Experience
+
+- Introduced a native Go SDK client for seamless integration into Go-based services.
+- Added a new safe-default evaluation API that provides detailed metadata through EvaluationDetail.
+- Implemented typed Context and ScopedClient to provide better type safety and developer ergonomics.
+- Added a dedicated snapshot API endpoint for efficient flag state retrieval.
+
+### 📶 Offline & Reliability
+
+- Enabled offline mode and client-side bootstrapping to ensure flag availability even without a network connection.
+- Added a persistent data store for flag snapshots to maintain state across application restarts.
+
+### ⚡ Real-time & Monitoring
+
+- Introduced real-time event streaming to push flag updates instantly to connected clients.
+- Added a Client Status API to monitor the health and connectivity of your SDK instances.
+
+### 🛠️ Management & Infrastructure
+
+- Automated database migrations and demo data seeding for faster environment setup.
+- Implemented environment-specific flag toggles and unified rule schemas for consistent configuration management.
+
+### 🛡️ Stability & Fixes
+
+- Corrected the audit log endpoint to serve correctly at /api/v1/audit.
+- Improved database stability by ensuring setup transactions roll back correctly using background contexts.
+
 ## [v0.2.0] - 2026-06-02
 
 [v0.2.0]: https://github.com/flagstonehq/flagstone/compare/v0.1.0...v0.2.0
