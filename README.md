@@ -12,7 +12,6 @@
 
 - [What is Flagstone?](#what-is-flagstone)
 - [The Problem](#the-problem)
-- [Real-World Use Cases](#real-world-use-cases)
 - [Why Flagstone?](#why-flagstone)
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
@@ -38,19 +37,7 @@ Instead of hardcoding `if userIsBeta { ... }`, you write `if flagstone.IsEnabled
 
 ## The Problem
 
-Every growing application hits the same walls:
-
-1. **You want to test a feature with a small group** before releasing to everyone, but a separate branch or conditional deploy is costly and fragile.
-
-2. **A new feature breaks production**, but a full deploy rollback reverts the 5 other things that shipped in that release. You need a granular kill switch.
-
-3. **Premium features should only be visible to certain plans**, but hardcoding that logic across services leads to inconsistencies.
-
-4. **You want a gradual rollout** (10% → 25% → 50% → 100%) to detect problems before they hit everyone.
-
-5. **You need A/B testing** to decide between two implementations, but existing tools are expensive or tied to analytics products.
-
-Current solutions have tradeoffs:
+At some point every team hits the same wall: you want to ship code without exposing a feature, turn off one behavior without rolling back the whole release, or limit access to a subset of users without hardcoding conditions per-service. The options available have real tradeoffs:
 
 | Tool | Issue |
 |---|---|
@@ -60,49 +47,7 @@ Current solutions have tradeoffs:
 | **Flipt** | Closest competitor — also Go + OTel. Moved to Git-native config in v2, adding complexity for teams that want a simple API-first approach |
 | **Roll your own** | You end up writing the same thing at every company |
 
-**Flagstone targets the gap**: simple to deploy (one binary + Postgres), lightweight, with native OpenTelemetry observability, and powerful enough for 90% of real-world use cases. Compared to Flipt, Flagstone stays API-first with a traditional database backend rather than requiring Git-based configuration workflows.
-
-## Real-World Use Cases
-
-### Discord Music Bot
-
-A bot that plays music in Discord servers. With Flagstone you can:
-
-- **Enable features per server**: an `advanced-equalizer` flag active only for premium or test servers.
-- **Gradual rollout of a new audio engine**: start with 5% of servers, monitor metrics, ramp up. If something breaks, drop to 0% instantly without a redeploy.
-- **Kill switch for problematic commands**: if `/loop` causes memory leaks, disable it globally while you fix it, without taking down the entire bot.
-- **Beta tester features**: a `beta-commands` flag that returns `true` only for a specific list of Discord user IDs.
-
-```go
-if flagstone.IsEnabled(ctx, "advanced-equalizer", flagstone.User{
-    ID:   interaction.GuildID,
-    Tier: "premium",
-}) {
-    return respondWithEqualizer(interaction)
-}
-return respondNormal(interaction)
-```
-
-### B2B SaaS
-
-A web application with thousands of business customers:
-
-- Release the new dashboard only to customers who opted into the beta program.
-- Enable the Slack integration only for Enterprise plan customers.
-- Roll out the new checkout flow to 1% of accounts, monitor conversion metrics, and ramp up gradually.
-
-### Mobile App
-
-An app you can't redeploy instantly (users take time to update):
-
-- Kill switch for features that depend on a broken backend endpoint.
-- Activate dark-launched features already in the code but not yet visible.
-- Show different promotions by country without republishing the app.
-
-### Internal Microservices
-
-- A `use-redis-cache` flag the platform team can disable if Redis has issues, so services fall back to direct DB queries.
-- Gradual migrations: a `write-to-new-table` flag controls whether services write to the old table, the new one, or both during a migration.
+**Flagstone targets the gap**: one binary + Postgres, API-first, with native OpenTelemetry observability. Compared to Flipt, it keeps a traditional database backend — no Git-based config workflows.
 
 ## Why Flagstone?
 
@@ -118,9 +63,7 @@ An app you can't redeploy instantly (users take time to update):
 | Language | Go | ? | TypeScript | Python | Go |
 | Cost | Free | $$$ | Free/$$$ | Free/$$$ | Free |
 
-**The key differentiator is native observability**: every flag evaluation emits OpenTelemetry traces and metrics, letting you correlate flag changes with latency, errors, or user behavior changes from the same dashboard you already use (Grafana, Datadog, Honeycomb, etc.).
-
-**Secondary differentiator: simplicity**. One binary, one Postgres, optional Redis. No Git workflows, no complex multi-service deployments.
+Every evaluation emits OpenTelemetry traces and metrics — so you can correlate a flag change with a latency spike in Grafana or Honeycomb without switching tools. One binary, one Postgres, optional Redis.
 
 ## Architecture
 
@@ -207,36 +150,36 @@ The [`diagrams/`](./diagrams/) folder contains a full architecture canvas export
 
 ## Features
 
-### Core (MVP)
+### Core
 
-- [ ] Boolean flags (on/off)
-- [ ] User and attribute targeting
-- [ ] Reusable segments
-- [ ] Percentage-based rollout with consistent hashing
-- [ ] Rules with AND/OR/NOT logic
-- [ ] Per-environment overrides (dev/staging/prod)
-- [ ] REST API + Go SDK
-- [ ] JWT auth for dashboard, API key auth for SDKs
-- [ ] Audit log (append-only, DB-enforced immutability)
+- [x] Boolean flags (on/off)
+- [x] User and attribute targeting
+- [x] Reusable segments
+- [x] Percentage-based rollout with consistent hashing
+- [x] Rules with AND/OR/NOT logic
+- [x] Per-environment overrides (dev/staging/prod)
+- [x] REST API + Go SDK
+- [x] JWT auth for dashboard, API key auth for SDKs
+- [x] Audit log (append-only, DB-enforced immutability)
 
-### Advanced (post-MVP)
+### Advanced
 
 - [ ] Multivariate flags (string/number/json variants)
-- [ ] Real-time streaming (SSE)
-- [ ] Multi-tenancy with isolation
-- [ ] Dashboard web (CRUD + real-time)
+- [x] Real-time streaming (SSE)
+- [x] Multi-tenancy with isolation
+- [x] Dashboard web (CRUD + real-time)
 - [ ] One-click rollback
 - [ ] TypeScript and Python SDKs
 - [ ] Webhooks on changes
-- [ ] Per-flag usage metrics
+- [x] Per-flag usage metrics (via OTel)
 - [ ] Rate limiting on API
 
 ### Differentiators
 
-- [ ] OpenTelemetry traces on every evaluation with flag attributes
-- [ ] Pre-configured Prometheus metrics
+- [x] OpenTelemetry traces on every evaluation with flag attributes
+- [x] Pre-configured Prometheus metrics
 - [ ] Example Grafana dashboard included
-- [ ] Automatic correlation with client app traces
+- [x] Automatic log-trace correlation
 - [ ] Shadow mode: evaluate but don't apply, to measure impact before activating
 - [ ] OpenFeature provider (CNCF standard compatibility)
 
@@ -450,7 +393,6 @@ flagstone/
 ├── Makefile                # Dev commands (build, test, migrate, lint)
 ├── DESIGN.md               # Architecture decisions and rationale
 ├── SECURITY.md             # Auth model, threat model, restore runbook
-├── BUSINESS.md             # Distribution model, pricing, execution phases
 └── README.md               # This file
 ```
 
@@ -566,7 +508,6 @@ $(terraform output -raw ssh_command)
 
 - **[DESIGN.md](./DESIGN.md)** — Architectural decisions: database design, rule engine, caching, infrastructure, costs.
 - **[SECURITY.md](./SECURITY.md)** — Authentication model, authorization (RBAC), API key handling, threat model, compliance considerations.
-- **[BUSINESS.md](./BUSINESS.md)** — Distribution model (OSS + Cloud), pricing strategy, revenue expectations, execution phases.
 - **[migrations/](./migrations/)** — Complete SQL database schema.
 - **[deploy/terraform/](./deploy/terraform/)** — AWS infrastructure as code.
 

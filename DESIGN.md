@@ -1,6 +1,6 @@
 # Flagstone — Design Decisions
 
-> This document justifies every design decision in the project. The goal is that 6 months from now, when you (or someone else) asks "why did we do X this way?", the answer is here.
+> Architecture decisions and rationale. If you're wondering why something works the way it does, the answer is here.
 
 ---
 
@@ -62,7 +62,7 @@
 
 ## Guiding Principles
 
-Before specific decisions, the principles that guide everything:
+These principles guide every decision:
 
 **1. Boring tech wins.** At every fork we choose the technology most people already know. Postgres instead of something exotic. Go instead of the latest trendy framework. When something breaks at 3 AM, there are 50,000 StackOverflow posts ready to help.
 
@@ -117,13 +117,7 @@ The original design proposed REST + gRPC from day one. After analysis, **gRPC ad
 
 ### Why OpenTelemetry as a first-class citizen
 
-This is our key market differentiator. Every flag evaluation emits:
-
-- A **span** with attributes (`flag.key`, `flag.value`, `user.id`, `rule.matched`).
-- **Metrics** in Prometheus format: counters per flag, latency histograms.
-- **Structured logs** correlated with the trace.
-
-LaunchDarkly, Flagsmith, and Unleash have integrations with observability systems. We _are_ a native piece of the OTel stack from day one. For teams already living in Grafana/Honeycomb/Datadog, this is a qualitative change.
+Every flag evaluation emits a span, increments a counter, and injects `trace_id`/`span_id` into the structured log. LaunchDarkly and Flagsmith have observability integrations; Flagstone is built as part of the OTel stack from the start. For teams already in Grafana or Honeycomb, this means you can correlate a flag rollout with a p99 spike without leaving your existing tooling.
 
 ### Why SSE over WebSockets
 
@@ -147,7 +141,7 @@ Next.js 15 (App Router)  +  TypeScript  +  Tailwind CSS  +  shadcn/ui
 
 #### Why this stack and not the Go-native alternative (HTMX + templ)
 
-An earlier version of this doc recommended HTMX + templ — server-side rendered HTML driven by the same Go binary. That recommendation was reconsidered after re-prioritizing what matters for Flagstone:
+HTMX + templ was considered — server-side rendered HTML from the same Go binary. After weighing what matters for Flagstone specifically:
 
 | Constraint | HTMX wins | Next.js wins |
 |---|---|---|
@@ -161,17 +155,17 @@ An earlier version of this doc recommended HTMX + templ — server-side rendered
 
 For Flagstone specifically:
 - The dashboard is critical UX for non-technical users (PMs, designers) — visual quality matters
-- The solo dev (TV) is a Go expert with no significant frontend background — AI tooling support is decisive
+- The backend is Go; the frontend is uncharted territory — AI tooling support is decisive
 - The dashboard is not on the hot evaluation path (no QPS impact) — operational simplicity of Go doesn't apply
 - The deploy-complexity argument is solved by `docker-compose` (see [Container Strategy](#container-strategy)), which self-hosters need anyway for Postgres + Redis
 
-The honest cost: a second codebase to maintain, a build pipeline with Node.js, and a learning curve. The honest benefit: a dashboard that looks like Linear/Vercel/Resend without hiring a designer.
+The tradeoff: a second codebase and a Node.js build pipeline. Worth it to get a Linear-quality dashboard without a designer.
 
 #### Why each piece
 
 **Next.js 15 (App Router)**: largest training data of any frontend framework → best AI assistance. Server Components by default → fast initial paint without SPA overhead. Built-in image optimization, code splitting, streaming.
 
-**TypeScript (strict mode)**: tipos compartidos entre llamadas a la API y componentes. AI tools alucinan menos cuando tienen tipos para razonar. End-to-end safety.
+**TypeScript (strict mode)**: shared types between API calls and components. End-to-end safety and better tooling support across the board.
 
 **Tailwind CSS**: utility classes are local and explicit — AI generates them correctly. No CSS-in-JS runtime overhead. Tree-shakeable to ~10 KB of CSS in production.
 
@@ -189,18 +183,9 @@ The honest cost: a second codebase to maintain, a build pipeline with Node.js, a
 | Testing | **Vitest + React Testing Library + Playwright** | Unit + integration + e2e |
 | Linting | **ESLint + Prettier + eslint-plugin-jsx-a11y** | A11y + format consistency |
 
-This is the same stack used by Linear, Cal.com, Resend, and Vercel themselves. Following the paved path means more documentation, more community help, more AI training data.
+Same stack as Linear, Cal.com, Resend. Well-documented, large community, and tooling that actually works.
 
-#### What is NOT in the dashboard
-
-Things that don't belong in the dashboard codebase and are intentionally absent:
-
-- **Flag evaluation logic** — the dashboard calls the API, never evaluates rules itself
-- **Direct database access** — only through the REST API
-- **Authentication primitives** — only the client side of auth; tokens, hashing, RBAC live in the Go backend
-- **Business logic** — the dashboard is a thin UI over the API
-
-This separation keeps the dashboard replaceable. If someone wants a CLI-only experience, the Go server runs without the dashboard. If someone wants their own custom UI, they build it against the same REST API.
+The dashboard is a thin client over the REST API — no evaluation logic, no direct DB access, no auth primitives. Everything goes through the same API endpoints that external SDKs use. This means the server works fine without the dashboard, and a custom UI is just another API consumer.
 
 ---
 
@@ -1394,40 +1379,25 @@ On each reconnect, the SDK sends `Last-Event-ID: <last_received_id>` in the HTTP
 
 ### What we instrument
 
-Every flag evaluation emits:
+Evaluation spans follow the [OTel feature-flag semantic conventions](https://opentelemetry.io/docs/specs/semconv/attributes-registry/feature-flag/):
 
 ```go
-// Span attributes on every evaluation
 span.SetAttributes(
-    attribute.String("flag.key", flagKey),
-    attribute.String("flag.type", flag.Type),
-    attribute.Bool("flag.enabled", config.Enabled),
-    attribute.String("flag.value", resultValue),
-    attribute.String("flag.reason", reason),      // "rule", "default", "disabled"
-    attribute.Int("flag.rule_index", ruleIndex),
-    attribute.String("user.id", userID),
-    attribute.String("environment", envSlug),
+    attribute.String("feature_flag.key", flagKey),
+    attribute.String("feature_flag.provider_name", "flagstone"),
+    attribute.String("feature_flag.result.reason", string(result.Reason)),
+    attribute.String("feature_flag.result.variant", fmt.Sprintf("%v", result.Value)),
+    attribute.String("flagstone.environment", env.Slug),
 )
 ```
 
-### Prometheus metrics
+DB query spans come from `otelpgx` automatically. HTTP spans from `otelhttp`. The logger injects `trace_id` and `span_id` so a log line can be pivoted to the full trace.
 
-| Metric | Type | Description |
-|---|---|---|
-| `flagstone_evaluations_total` | Counter | Total evaluations (labels: flag, env, result) |
-| `flagstone_evaluation_duration_seconds` | Histogram | Evaluation latency |
-| `flagstone_cache_hits_total` | Counter | Cache hit rate (labels: level) |
-| `flagstone_sse_connections` | Gauge | Active SSE connections |
-| `flagstone_api_requests_total` | Counter | API requests (labels: method, path, status) |
+See [docs/OBSERVABILITY.md](./docs/OBSERVABILITY.md) for the full metric list and backend configuration examples.
 
 ### Pre-built Grafana dashboard
 
-The project will include a JSON dashboard for Grafana that shows:
-- Flag evaluation rates and latency
-- Cache hit ratios
-- Active SSE connections
-- API error rates
-- Audit log activity
+Planned — will include evaluation rates, snapshot latency, SSE connection count, and DB pool wait time.
 
 ---
 
@@ -1558,10 +1528,10 @@ Deploy:
 When we have customers paying for 99.9% SLA (~43 min/month tolerated downtime), a broken deploy costs real money. Canary minimizes blast radius:
 
 ```
-Fase 1:  5% → v1.1, 95% → v1.0   (15 min observation window)
-Fase 2: 25% → v1.1, 75% → v1.0   (30 min)
-Fase 3: 50% → v1.1, 50% → v1.0   (1 hour)
-Fase 4: 100% → v1.1
+Phase 1:  5% → v1.1, 95% → v1.0   (15 min observation window)
+Phase 2: 25% → v1.1, 75% → v1.0   (30 min)
+Phase 3: 50% → v1.1, 50% → v1.0   (1 hour)
+Phase 4: 100% → v1.1
 ```
 
 Each phase has automatic gates:
@@ -1735,8 +1705,6 @@ Configure in CloudWatch:
 
 ## Monetization Model
 
-> Strategy, pricing, and execution phases live in **[BUSINESS.md](./BUSINESS.md)**. This section covers the architectural implications.
-
 Flagstone is **dual-distribution**: the same codebase runs as both a fully open-source self-hosted server and as our managed Cloud offering. There is **no fork**, no enterprise-only feature flags, no closed-source addons. The only difference between the two is operational and configuration.
 
 ### Self-hosted (free, MIT license)
@@ -1830,13 +1798,9 @@ Flipt is the closest competitor: same language (Go), same philosophy (self-hoste
 2. **Flagstone stays API-first** with a traditional database backend. Create a flag via API, change it via dashboard, see the effect in seconds.
 3. **Flagstone targets simplicity over features** — Flipt has years of features we won't match. We win on ease of deployment and learning curve.
 
-### Honest assessment
+### Positioning
 
-Flagstone is NOT going to replace Flipt for teams that already use it. Our market is:
-- Teams that haven't adopted feature flags yet (greenfield)
-- Teams that find Flipt's Git-native model too complex
-- Teams that want the simplest possible self-hosted solution
-- Solo devs / small teams that want one binary + Postgres
+Flagstone isn't going to displace Flipt for teams already using it. The target is greenfield adoption: teams that haven't committed to a feature flag system yet, teams that find Git-native config overkill, and solo devs or small teams that want one binary + Postgres without ceremony.
 
 ### OpenFeature (CNCF standard)
 

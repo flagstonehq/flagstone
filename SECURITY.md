@@ -1,6 +1,6 @@
 # Flagstone — Security Model
 
-> This document describes Flagstone's authentication, authorization, cryptographic choices, and threat model. It's written for two audiences: developers implementing the system, and auditors evaluating it.
+> Authentication, authorization, cryptographic choices, and threat model.
 
 ---
 
