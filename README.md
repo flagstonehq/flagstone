@@ -3,7 +3,7 @@
 > Self-hosted feature flag server with native OpenTelemetry observability. Built in Go.
 
 [![Go Version](https://img.shields.io/badge/go-1.22+-00ADD8?logo=go)]()
-[![License](https://img.shields.io/badge/license-MIT-blue)]()
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Status](https://img.shields.io/badge/status-WIP-orange)]()
 
 ---
@@ -524,7 +524,9 @@ Areas where help will be especially welcome:
 
 ## License
 
-MIT — use it, fork it, sell it, whatever. Just don't sue me if it breaks something.
+AGPL-3.0. You can use, self-host, and modify Flagstone freely, but if you run a modified version as a network service you must publish the source. See [LICENSE](LICENSE) for the full terms.
+
+Flagstone Cloud (the hosted version) is operated by the copyright holder under a separate commercial arrangement.
 
 ---
 
