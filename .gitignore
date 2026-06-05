@@ -94,3 +94,14 @@ docker-compose.override.yml
 ehthumbs.db
 
 .matecommit
+
+# -----------------------------------------------------------------------------
+# Private strategy docs (local only, not for public repo)
+# -----------------------------------------------------------------------------
+ROADMAP_ES.md
+BUSINESS.md
+CUSTOMER_PERSONAS.md
+COMPARISON.md
+docs/PLAN_SDK_SSE.md
+docs/PLAN_OTEL.md
+docs/LAUNCH_PLAN.md
