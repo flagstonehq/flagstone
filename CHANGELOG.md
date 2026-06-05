@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 
+## [v0.4.0] - 2026-06-05
+
+[v0.4.0]: https://github.com/flagstonehq/flagstone/compare/v0.3.0...v0.4.0
+
+In this release, we focused on enhancing the transparency and monitorability of the Flagstone platform. We've introduced OpenTelemetry support to help you gain deeper insights into your system's performance and simplify the debugging process.
+
+### 📊 Observability & Monitoring
+
+- We integrated OpenTelemetry to provide deep visibility into system performance through comprehensive distributed tracing and real-time metrics.
+
 ## [v0.3.0] - 2026-06-04
 
 [v0.3.0]: https://github.com/flagstonehq/flagstone/compare/v0.2.0...v0.3.0
