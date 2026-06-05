@@ -529,5 +529,3 @@ AGPL-3.0. You can use, self-host, and modify Flagstone freely, but if you run a 
 Flagstone Cloud (the hosted version) is operated by the copyright holder under a separate commercial arrangement.
 
 ---
-
-**Built with Go from Argentina**
