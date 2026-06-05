@@ -10,8 +10,10 @@ import (
 
 	"github.com/flagstonehq/flagstone/internal/api/middleware"
 	"github.com/flagstonehq/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/internal/telemetry"
 	"github.com/flagstonehq/flagstone/pkg/engine"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/codes"
 	"go.uber.org/zap"
 )
 
@@ -117,11 +119,35 @@ func (s *Server) handleEvaluateFlag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx, span := telemetry.NewSpan(r.Context(), "feature_flag.evaluation",
+		telemetry.FeatureFlagKey.String(flagKey),
+		telemetry.FeatureFlagProviderName.String("flagstone"),
+	)
+	defer span.End()
+	r = r.WithContext(ctx)
+
 	result := s.engine.Evaluate(engine.EvaluateRequest{
 		FlagConfig: fc,
 		Segments:   segments,
 		Context:    req.Context,
 	})
+
+	span.SetAttributes(
+		telemetry.FeatureFlagResultVariant.String(fmt.Sprintf("%v", result.Value)),
+		telemetry.FeatureFlagResultReason.String(string(result.Reason)),
+		telemetry.FlagstoneEnvironment.String(env.Slug),
+	)
+	if result.Reason == engine.ReasonInternalErr {
+		span.SetStatus(codes.Error, "engine internal error")
+	}
+
+	if s.metrics != nil {
+		s.metrics.RecordEvaluation(ctx,
+			telemetry.FeatureFlagKey.String(flagKey),
+			telemetry.FeatureFlagResultReason.String(string(result.Reason)),
+			telemetry.FlagstoneEnvironment.String(env.Slug),
+		)
+	}
 
 	middleware.JSON(w, http.StatusOK, evaluateFlagResponse{
 		Key:       flag.Key,
@@ -161,6 +187,13 @@ func (s *Server) handleEvaluateFlags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx, span := telemetry.NewSpan(r.Context(), "feature_flag.evaluate.bulk",
+		telemetry.FlagstoneEnvironment.String(env.Slug),
+		telemetry.FeatureFlagProviderName.String("flagstone"),
+	)
+	defer span.End()
+	r = r.WithContext(ctx)
+
 	dbConfigs, err := s.stores.FlagEnvironments.ListByEnvironment(r.Context(), envID)
 	if err != nil {
 		s.logger.Error("evaluate: list by environment", zap.Error(err))
@@ -186,6 +219,16 @@ func (s *Server) handleEvaluateFlags(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := s.engine.EvaluateAll(flags, segments, req.Context)
+
+	if s.metrics != nil {
+		for key, res := range results {
+			s.metrics.RecordEvaluation(ctx,
+				telemetry.FeatureFlagKey.String(key),
+				telemetry.FeatureFlagResultReason.String(string(res.Reason)),
+				telemetry.FlagstoneEnvironment.String(env.Slug),
+			)
+		}
+	}
 
 	reqID := middleware.RequestIDFromContext(r.Context())
 	middleware.JSON(w, http.StatusOK, evaluateFlagsResponse{

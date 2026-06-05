@@ -10,11 +10,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/exaring/otelpgx"
 	"github.com/flagstonehq/flagstone/internal/api"
 	"github.com/flagstonehq/flagstone/internal/config"
 	"github.com/flagstonehq/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/internal/telemetry"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 )
 
@@ -67,6 +70,16 @@ func main() {
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	shutdownOtel, err := telemetry.SetupOTel(rootCtx, "flagstone")
+	if err != nil {
+		logger.Fatal("failed to setup telemetry", zap.Error(err))
+	}
+	defer func() {
+		if err := shutdownOtel(context.Background()); err != nil {
+			logger.Error("telemetry shutdown error", zap.Error(err))
+		}
+	}()
+
 	dbPool, err := connectPostgresWithRetry(rootCtx, cfg.DatabaseURL, logger)
 	if err != nil {
 		logger.Fatal("failed to connect to postgres", zap.Error(err))
@@ -80,7 +93,20 @@ func main() {
 
 	stores := storage.NewStores(dbPool)
 
-	apiServer := api.NewServer(stores, dbPool, cfg, logger, redisClient)
+	metrics, err := telemetry.NewMetrics(otel.GetMeterProvider())
+	if err != nil {
+		logger.Fatal("failed to create metrics", zap.Error(err))
+	}
+	if metrics != nil {
+		if err := metrics.RegisterDBPoolGauge(rootCtx, func() int64 {
+			stat := dbPool.Stat()
+			return int64(stat.IdleConns())
+		}); err != nil {
+			logger.Warn("failed to register db pool gauge", zap.Error(err))
+		}
+	}
+
+	apiServer := api.NewServer(stores, dbPool, cfg, logger, redisClient, metrics)
 	apiServer.StartCleanup(rootCtx)
 
 	mux := http.NewServeMux()
@@ -99,16 +125,18 @@ func main() {
 
 	mux.Handle("/api/v1/", apiServer.Routes())
 
+	handler := telemetry.WrapWithTracing(mux, "/healthz", "/readyz")
+
 	srv := &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {
-		logger.Info("listenig", zap.String("addr", cfg.Addr))
+		logger.Info("listening", zap.String("addr", cfg.Addr))
 		if err := srv.ListenAndServe(); err != nil {
 			logger.Error("server error", zap.Error(err))
 			os.Exit(1) //nolint:gocritic // exit on unrecoverable server error
@@ -198,6 +226,7 @@ func connectPostgresWithRetry(ctx context.Context, databaseURL string, logger *z
 		poolCfg.MaxConnLifetime = time.Hour
 		poolCfg.MaxConnIdleTime = 5 * time.Minute
 		poolCfg.HealthCheckPeriod = 30 * time.Second
+		poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
 
 		pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 		if err == nil {

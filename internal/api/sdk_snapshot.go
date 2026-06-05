@@ -8,8 +8,10 @@ import (
 
 	"github.com/flagstonehq/flagstone/internal/api/middleware"
 	"github.com/flagstonehq/flagstone/internal/storage"
+	"github.com/flagstonehq/flagstone/internal/telemetry"
 	"github.com/flagstonehq/flagstone/pkg/engine"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/codes"
 	"go.uber.org/zap"
 )
 
@@ -55,10 +57,23 @@ func (s *Server) handleSDKSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx, span := telemetry.NewSpan(r.Context(), "flagstone.snapshot.fetch",
+		telemetry.FlagstoneEnvironment.String(env.Slug),
+	)
+	defer span.End()
+	start := time.Now()
+
 	dbConfigs, err := s.stores.FlagEnvironments.ListByEnvironment(r.Context(), envID)
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		s.logger.Error("sdk snapshot: list by environment", zap.Error(err))
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		if s.metrics != nil {
+			s.metrics.RecordSnapshotFetch(ctx, time.Since(start),
+				telemetry.FlagstoneEnvironment.String(env.Slug),
+				telemetry.FlagstoneStatus.String("error"),
+			)
+		}
 		return
 	}
 
@@ -84,8 +99,15 @@ func (s *Server) handleSDKSnapshot(w http.ResponseWriter, r *http.Request) {
 
 	dbSegments, err := s.stores.Segments.ListByProject(r.Context(), env.ProjectID)
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		s.logger.Error("sdk snapshot: list segments", zap.Error(err))
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
+		if s.metrics != nil {
+			s.metrics.RecordSnapshotFetch(ctx, time.Since(start),
+				telemetry.FlagstoneEnvironment.String(env.Slug),
+				telemetry.FlagstoneStatus.String("error"),
+			)
+		}
 		return
 	}
 
@@ -103,6 +125,13 @@ func (s *Server) handleSDKSnapshot(w http.ResponseWriter, r *http.Request) {
 			Key:        ds.Key,
 			Conditions: cond,
 		}
+	}
+
+	if s.metrics != nil {
+		s.metrics.RecordSnapshotFetch(ctx, time.Since(start),
+			telemetry.FlagstoneEnvironment.String(env.Slug),
+			telemetry.FlagstoneStatus.String("success"),
+		)
 	}
 
 	resp := snapshotResponse{

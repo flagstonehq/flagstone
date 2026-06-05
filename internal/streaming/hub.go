@@ -12,6 +12,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// Metrics is the instrumentation interface consumed by the SSE hub.
+// The concrete implementation lives in internal/telemetry.
+type Metrics interface {
+	AddSSEConnectionDelta(ctx context.Context, delta int64)
+	RecordSSEEvent(ctx context.Context, eventType string)
+}
+
 const (
 	replayBufferSize = 1000
 	replayKeyTTL     = 30 * time.Minute
@@ -39,6 +46,7 @@ type Hub struct {
 	publish    chan Event
 	stop       chan struct{}
 	logger     *zap.Logger
+	metrics    Metrics
 }
 
 // HubConfig configures a Hub instance.
@@ -46,6 +54,7 @@ type HubConfig struct {
 	Redis        *redis.Client
 	PerAPIKeyCap int
 	Logger       *zap.Logger
+	Metrics      Metrics
 }
 
 // NewHub creates and returns a new Hub with the given config.
@@ -64,6 +73,7 @@ func NewHub(cfg HubConfig) *Hub {
 		publish:    make(chan Event, 256),
 		stop:       make(chan struct{}),
 		logger:     cfg.Logger,
+		metrics:    cfg.Metrics,
 	}
 }
 
@@ -88,6 +98,9 @@ func (h *Hub) Run(ctx context.Context) {
 			h.clients[client.envID][client] = struct{}{}
 			h.perKey[client.apiKeyID]++
 			h.mu.Unlock()
+			if h.metrics != nil {
+				h.metrics.AddSSEConnectionDelta(ctx, 1)
+			}
 		case client := <-h.unregister:
 			h.mu.Lock()
 			if _, ok := h.clients[client.envID][client]; ok {
@@ -99,9 +112,15 @@ func (h *Hub) Run(ctx context.Context) {
 			}
 			close(client.send)
 			h.mu.Unlock()
+			if h.metrics != nil {
+				h.metrics.AddSSEConnectionDelta(ctx, -1)
+			}
 		case ev := <-h.publish:
 			h.broadcast(ev)
 			h.persistToRedis(ev)
+			if h.metrics != nil {
+				h.metrics.RecordSSEEvent(ctx, ev.Type)
+			}
 		}
 	}
 }

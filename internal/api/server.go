@@ -10,6 +10,7 @@ import (
 	"github.com/flagstonehq/flagstone/internal/config"
 	"github.com/flagstonehq/flagstone/internal/storage"
 	"github.com/flagstonehq/flagstone/internal/streaming"
+	"github.com/flagstonehq/flagstone/internal/telemetry"
 	"github.com/flagstonehq/flagstone/pkg/engine"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,11 +26,12 @@ const (
 
 // Server holds shared dependencies for all API handlers and registers routes.
 type Server struct {
-	stores *storage.Stores
-	dbPool *pgxpool.Pool
-	cfg    *config.Config
-	logger *zap.Logger
-	engine *engine.Engine
+	stores  *storage.Stores
+	dbPool  *pgxpool.Pool
+	cfg     *config.Config
+	logger  *zap.Logger
+	engine  *engine.Engine
+	metrics *telemetry.Metrics
 
 	// fakePasswordHash is a precomputed bcrypt hash used to keep login
 	// response times constant when the email isn't found in the DB. Without
@@ -44,7 +46,7 @@ type Server struct {
 }
 
 // NewServer creates a new API Server with the given dependencies.
-func NewServer(stores *storage.Stores, dbPool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, rdb *redis.Client) *Server {
+func NewServer(stores *storage.Stores, dbPool *pgxpool.Pool, cfg *config.Config, logger *zap.Logger, rdb *redis.Client, metrics *telemetry.Metrics) *Server {
 	fake, err := auth.HashPassword("flagstone-timing-decoy", cfg.BcryptCost)
 	if err != nil {
 		logger.Warn("could not precompute fake password hash; login timing oracle defense disabled", zap.Error(err))
@@ -53,6 +55,7 @@ func NewServer(stores *storage.Stores, dbPool *pgxpool.Pool, cfg *config.Config,
 		Redis:        rdb,
 		PerAPIKeyCap: 10,
 		Logger:       logger,
+		Metrics:      metrics,
 	})
 	go hub.Run(context.Background())
 
@@ -62,6 +65,7 @@ func NewServer(stores *storage.Stores, dbPool *pgxpool.Pool, cfg *config.Config,
 		cfg:              cfg,
 		logger:           logger,
 		engine:           engine.New(logger),
+		metrics:          metrics,
 		fakePasswordHash: fake,
 		loginLimiter:     middleware.NewIPRateLimiter(5, time.Minute),
 		refreshLimiter:   middleware.NewIPRateLimiter(10, time.Minute),
