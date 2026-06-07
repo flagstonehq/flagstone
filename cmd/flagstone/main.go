@@ -98,11 +98,15 @@ func main() {
 		logger.Fatal("failed to create metrics", zap.Error(err))
 	}
 	if metrics != nil {
-		if err := metrics.RegisterDBPoolGauge(rootCtx, func() int64 {
+		if err := metrics.RegisterDBPoolStats(func() telemetry.DBPoolStats {
 			stat := dbPool.Stat()
-			return int64(stat.IdleConns())
+			return telemetry.DBPoolStats{
+				IdleConns:          int64(stat.IdleConns()),
+				AcquiredTotal:      stat.AcquireCount(),
+				AcquireWaitSeconds: stat.AcquireDuration().Seconds(),
+			}
 		}); err != nil {
-			logger.Warn("failed to register db pool gauge", zap.Error(err))
+			logger.Warn("failed to register db pool stats", zap.Error(err))
 		}
 	}
 
