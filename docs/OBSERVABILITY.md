@@ -28,12 +28,28 @@ flagstone
 | Env var | Default | Description |
 |---|---|---|
 | `OTEL_TRACES_EXPORTER` | _(unset → no-op)_ | `otlp` or `none` |
-| `OTEL_METRICS_EXPORTER` | _(unset → no-op)_ | `otlp` or `none` |
+| `OTEL_METRICS_EXPORTER` | _(unset → no-op)_ | `otlp`, `prometheus`, `otlp,prometheus`, or `none` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | Target backend or OTel Collector |
+| `OTEL_EXPORTER_PROMETHEUS_HOST` | _(all interfaces)_ | Host for the Prometheus pull endpoint |
+| `OTEL_EXPORTER_PROMETHEUS_PORT` | `9464` | Port for the Prometheus pull endpoint (`/metrics`) |
 | `OTEL_TRACES_SAMPLER` | `parentbased_traceidratio` | Sampling strategy |
-| `OTEL_TRACES_SAMPLER_ARG` | `1.0` (100%) | Sampling ratio (0.0–1.0) |
+| `OTEL_TRACES_SAMPLER_ARG` | `0.1` (10%) | Sampling ratio (0.0–1.0) |
 | `OTEL_SERVICE_NAME` | `flagstone` | Service identity |
 | `OTEL_RESOURCE_ATTRIBUTES` | — | [Resource attributes](https://opentelemetry.io/docs/concepts/resources/) |
+
+### Metrics: push (OTLP) vs pull (Prometheus)
+
+`OTEL_METRICS_EXPORTER` accepts a comma-separated list, so the two modes can coexist:
+
+- `otlp` — push metrics to `OTEL_EXPORTER_OTLP_ENDPOINT` on a 30s interval.
+- `prometheus` — expose a pull endpoint at `:9464/metrics` for teams that already scrape with Prometheus. No push pipeline needed.
+- `otlp,prometheus` — run both.
+
+```bash
+# Prometheus pull only — scrape http://<host>:9464/metrics
+export OTEL_METRICS_EXPORTER=prometheus
+flagstone
+```
 
 ## Traces
 
@@ -66,9 +82,9 @@ Flagstone creates spans for:
 | `flagstone.snapshot.fetch.total` | Counter | `flagstone.environment`, `flagstone.status` | Snapshot fetch count |
 | `flagstone.sse.connections.active` | Gauge | — | Concurrent SSE connections |
 | `flagstone.sse.events.published.total` | Counter | `flagstone.event.type` | Published SSE events |
-| `flagstone.db.pool.acquire.wait.duration` | Histogram | — | Pool acquire wait (seconds) |
-| `flagstone.db.pool.connections.idle` | Gauge | — | Idle DB connections |
-| `flagstone.db.pool.connections.acquired.total` | Counter | — | Connections acquired from pool |
+| `flagstone.db.pool.connections.idle` | Gauge | — | Idle DB connections (from `pgxpool.Stat()`) |
+| `flagstone.db.pool.connections.acquired.total` | Counter | — | Cumulative connections acquired from pool |
+| `flagstone.db.pool.acquire.wait.duration` | Counter | — | Cumulative pool acquire wait (seconds) |
 
 Additional standard metrics from `otelhttp` and `otelpgx`.
 

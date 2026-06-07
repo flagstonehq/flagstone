@@ -13,15 +13,24 @@ import (
 // A nil *Metrics is safe to use (all methods become no-ops)
 // so tests that don't need observability can pass nil.
 type Metrics struct {
-	mp                    metric.MeterProvider
-	evaluationsTotal      metric.Int64Counter
-	snapshotFetchDuration metric.Float64Histogram
-	snapshotFetchTotal    metric.Int64Counter
-	sseConnectionsActive  metric.Int64UpDownCounter
-	sseEventsPublished    metric.Int64Counter
-	dbPoolAcquireWaitDur  metric.Float64Histogram
-	dbPoolConnectionsIdle metric.Int64ObservableGauge
-	dbPoolConnectionsAcq  metric.Int64UpDownCounter
+	mp                     metric.MeterProvider
+	evaluationsTotal       metric.Int64Counter
+	snapshotFetchDuration  metric.Float64Histogram
+	snapshotFetchTotal     metric.Int64Counter
+	sseConnectionsActive   metric.Int64UpDownCounter
+	sseEventsPublished     metric.Int64Counter
+	dbPoolConnectionsIdle  metric.Int64ObservableGauge
+	dbPoolAcquiredTotal    metric.Int64ObservableCounter
+	dbPoolAcquireWaitTotal metric.Float64ObservableCounter
+}
+
+// DBPoolStats is a backend-agnostic snapshot of pgxpool.Stat() values the
+// telemetry layer reports. The caller maps pgxpool.Stat() into this struct so
+// the telemetry package stays free of a pgx dependency.
+type DBPoolStats struct {
+	IdleConns          int64
+	AcquiredTotal      int64   // cumulative count of successful acquires
+	AcquireWaitSeconds float64 // cumulative time spent waiting on acquires
 }
 
 // NewMetrics creates all Flagstone metric instruments from the given
@@ -71,15 +80,6 @@ func NewMetrics(mp metric.MeterProvider) (*Metrics, error) {
 		return nil, fmt.Errorf("flagstone.sse.events.published.total: %w", err)
 	}
 
-	dbWaitDur, err := meter.Float64Histogram(
-		"flagstone.db.pool.acquire.wait.duration",
-		metric.WithDescription("Time spent waiting for a DB connection from the pool"),
-		metric.WithUnit("s"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("flagstone.db.pool.acquire.wait.duration: %w", err)
-	}
-
 	dbIdle, err := meter.Int64ObservableGauge(
 		"flagstone.db.pool.connections.idle",
 		metric.WithDescription("Current number of idle DB connections in the pool"),
@@ -88,24 +88,33 @@ func NewMetrics(mp metric.MeterProvider) (*Metrics, error) {
 		return nil, fmt.Errorf("flagstone.db.pool.connections.idle: %w", err)
 	}
 
-	dbAcq, err := meter.Int64UpDownCounter(
+	dbAcq, err := meter.Int64ObservableCounter(
 		"flagstone.db.pool.connections.acquired.total",
-		metric.WithDescription("Total number of DB connections acquired from the pool"),
+		metric.WithDescription("Cumulative number of DB connections acquired from the pool"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("flagstone.db.pool.connections.acquired.total: %w", err)
 	}
 
+	dbWaitTotal, err := meter.Float64ObservableCounter(
+		"flagstone.db.pool.acquire.wait.duration",
+		metric.WithDescription("Cumulative time spent waiting for a DB connection from the pool"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("flagstone.db.pool.acquire.wait.duration: %w", err)
+	}
+
 	return &Metrics{
-		mp:                    mp,
-		evaluationsTotal:      evalTotal,
-		snapshotFetchDuration: snapDur,
-		snapshotFetchTotal:    snapTotal,
-		sseConnectionsActive:  sseActive,
-		sseEventsPublished:    ssePub,
-		dbPoolAcquireWaitDur:  dbWaitDur,
-		dbPoolConnectionsIdle: dbIdle,
-		dbPoolConnectionsAcq:  dbAcq,
+		mp:                     mp,
+		evaluationsTotal:       evalTotal,
+		snapshotFetchDuration:  snapDur,
+		snapshotFetchTotal:     snapTotal,
+		sseConnectionsActive:   sseActive,
+		sseEventsPublished:     ssePub,
+		dbPoolConnectionsIdle:  dbIdle,
+		dbPoolAcquiredTotal:    dbAcq,
+		dbPoolAcquireWaitTotal: dbWaitTotal,
 	}, nil
 }
 
@@ -144,34 +153,25 @@ func (m *Metrics) RecordSSEEvent(ctx context.Context, eventType string) {
 	)
 }
 
-// RecordDBPoolAcquireWait records the pool acquire wait duration.
-func (m *Metrics) RecordDBPoolAcquireWait(ctx context.Context, duration time.Duration) {
-	if m == nil || m.dbPoolAcquireWaitDur == nil {
-		return
-	}
-	m.dbPoolAcquireWaitDur.Record(ctx, duration.Seconds())
-}
-
-// RegisterDBPoolGauge registers an observable callback that reports idle
-// connections. The callback reads from the pgxpool.Stat() result.
-func (m *Metrics) RegisterDBPoolGauge(_ context.Context, statFn func() int64) error {
+// RegisterDBPoolStats registers a single observable callback that reports all
+// DB pool metrics (idle connections, cumulative acquires, cumulative acquire
+// wait). The callback reads a DBPoolStats snapshot — typically mapped from
+// pgxpool.Stat() — on each collection cycle.
+func (m *Metrics) RegisterDBPoolStats(statFn func() DBPoolStats) error {
 	if m == nil || m.dbPoolConnectionsIdle == nil {
 		return nil
 	}
 	_, err := m.mp.Meter("github.com/flagstonehq/flagstone").RegisterCallback(
 		func(_ context.Context, obs metric.Observer) error {
-			obs.ObserveInt64(m.dbPoolConnectionsIdle, statFn())
+			s := statFn()
+			obs.ObserveInt64(m.dbPoolConnectionsIdle, s.IdleConns)
+			obs.ObserveInt64(m.dbPoolAcquiredTotal, s.AcquiredTotal)
+			obs.ObserveFloat64(m.dbPoolAcquireWaitTotal, s.AcquireWaitSeconds)
 			return nil
 		},
 		m.dbPoolConnectionsIdle,
+		m.dbPoolAcquiredTotal,
+		m.dbPoolAcquireWaitTotal,
 	)
 	return err
-}
-
-// AddDBConnectionAcquired increments the acquired connections counter.
-func (m *Metrics) AddDBConnectionAcquired(ctx context.Context, delta int64) {
-	if m == nil || m.dbPoolConnectionsAcq == nil {
-		return
-	}
-	m.dbPoolConnectionsAcq.Add(ctx, delta)
 }

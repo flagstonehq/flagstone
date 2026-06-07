@@ -4,12 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	promexporter "go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -23,6 +28,10 @@ import (
 // If OTEL_TRACES_EXPORTER and OTEL_METRICS_EXPORTER are both unset
 // (or "none"), the providers are no-op and shutdown is a no-op.
 // This gives zero-overhead when observability is not configured.
+//
+// OTEL_METRICS_EXPORTER accepts a comma-separated list: "otlp", "prometheus",
+// or "otlp,prometheus". The prometheus reader exposes a pull endpoint at
+// :9464/metrics (override host/port via OTEL_EXPORTER_PROMETHEUS_HOST/PORT).
 func SetupOTel(ctx context.Context, serviceName string) (shutdown func(context.Context) error, err error) {
 	var shutdownFuncs []func(context.Context) error
 
@@ -36,12 +45,10 @@ func SetupOTel(ctx context.Context, serviceName string) (shutdown func(context.C
 		return errors.Join(errs...)
 	}
 
-	tracesOn := os.Getenv("OTEL_TRACES_EXPORTER") != "" &&
-		os.Getenv("OTEL_TRACES_EXPORTER") != "none"
-	metricsOn := os.Getenv("OTEL_METRICS_EXPORTER") != "" &&
-		os.Getenv("OTEL_METRICS_EXPORTER") != "none"
+	tracesOn := exporterEnabled("OTEL_TRACES_EXPORTER")
+	metricExporters := metricExporterSet()
 
-	if !tracesOn && !metricsOn {
+	if !tracesOn && len(metricExporters) == 0 {
 		// OTel defaults to noop providers already. Nothing to set up.
 		return shutdown, nil
 	}
@@ -78,26 +85,90 @@ func SetupOTel(ctx context.Context, serviceName string) (shutdown func(context.C
 		otel.SetTracerProvider(tp)
 	}
 
-	if metricsOn {
-		metricExp, err := otlpmetrichttp.New(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("telemetry: create metric exporter: %w", err)
-		}
+	if len(metricExporters) > 0 {
+		opts := []metric.Option{metric.WithResource(res)}
 
-		mp := metric.NewMeterProvider(
-			metric.WithReader(
+		if metricExporters["otlp"] {
+			metricExp, err := otlpmetrichttp.New(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("telemetry: create otlp metric exporter: %w", err)
+			}
+			opts = append(opts, metric.WithReader(
 				metric.NewPeriodicReader(metricExp,
 					metric.WithInterval(30*time.Second),
 				),
-			),
-			metric.WithResource(res),
-		)
+			))
+		}
+
+		if metricExporters["prometheus"] {
+			registry := prometheus.NewRegistry()
+			promReader, err := promexporter.New(promexporter.WithRegisterer(registry))
+			if err != nil {
+				return nil, fmt.Errorf("telemetry: create prometheus exporter: %w", err)
+			}
+			opts = append(opts, metric.WithReader(promReader))
+
+			promSrv := startPrometheusServer(registry)
+			shutdownFuncs = append(shutdownFuncs, promSrv.Shutdown)
+		}
+
+		mp := metric.NewMeterProvider(opts...)
 		shutdownFuncs = append(shutdownFuncs, mp.Shutdown)
 
 		otel.SetMeterProvider(mp)
 	}
 
 	return shutdown, nil
+}
+
+// startPrometheusServer launches an HTTP server exposing /metrics for the
+// given registry. The address defaults to :9464 and honors the standard
+// OTEL_EXPORTER_PROMETHEUS_HOST / OTEL_EXPORTER_PROMETHEUS_PORT env vars.
+func startPrometheusServer(registry *prometheus.Registry) *http.Server {
+	host := os.Getenv("OTEL_EXPORTER_PROMETHEUS_HOST")
+	port := os.Getenv("OTEL_EXPORTER_PROMETHEUS_PORT")
+	if port == "" {
+		port = "9464"
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+
+	srv := &http.Server{
+		Addr:              host + ":" + port,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			otel.Handle(err)
+		}
+	}()
+	return srv
+}
+
+// exporterEnabled reports whether the given OTEL_*_EXPORTER env var is set
+// to a non-empty value other than "none".
+func exporterEnabled(envVar string) bool {
+	v := strings.TrimSpace(os.Getenv(envVar))
+	return v != "" && v != "none"
+}
+
+// metricExporterSet parses OTEL_METRICS_EXPORTER (comma-separated) into a set
+// of recognized exporters. "none" or empty yields an empty set.
+func metricExporterSet() map[string]bool {
+	raw := strings.TrimSpace(os.Getenv("OTEL_METRICS_EXPORTER"))
+	if raw == "" || raw == "none" {
+		return nil
+	}
+	set := make(map[string]bool)
+	for part := range strings.SplitSeq(raw, ",") {
+		switch p := strings.TrimSpace(part); p {
+		case "otlp", "prometheus":
+			set[p] = true
+		}
+	}
+	return set
 }
 
 // sampleRatio returns the sampling ratio from OTEL_TRACES_SAMPLER_ARG,
