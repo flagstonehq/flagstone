@@ -107,7 +107,9 @@ func (s *Server) Routes() http.Handler {
 
 	loginHandler := s.withMiddleware(
 		http.HandlerFunc(s.handleLogin),
-		middleware.RateLimit(s.loginLimiter),
+		middleware.RateLimit(s.loginLimiter, func() {
+			s.metrics.RecordAuthRateLimitHit(context.Background(), "login")
+		}),
 		middleware.RequestID(),
 		middleware.Logger(s.logger),
 		middleware.BodyLimit(1<<20),
@@ -117,7 +119,9 @@ func (s *Server) Routes() http.Handler {
 
 	refreshHandler := s.withMiddleware(
 		http.HandlerFunc(s.handleRefresh),
-		middleware.RateLimit(s.refreshLimiter),
+		middleware.RateLimit(s.refreshLimiter, func() {
+			s.metrics.RecordAuthRateLimitHit(context.Background(), "refresh")
+		}),
 		middleware.RequestID(),
 		middleware.Logger(s.logger),
 	)
@@ -405,13 +409,17 @@ func (s *Server) Routes() http.Handler {
 	)
 	mux.Handle("GET /api/v1/audit", recoverMW(auditHandler))
 
+	apiKeyResult := func(status string) {
+		s.metrics.RecordAuthAPIKeyValidation(context.Background(), status)
+	}
+
 	evaluateSingleHandler := s.withMiddleware(
 		http.HandlerFunc(s.handleEvaluateFlag),
 		middleware.RequestID(),
 		middleware.Logger(s.logger),
 		middleware.BodyLimit(1<<20),
 		middleware.RequireJSONContentType(),
-		middleware.AuthAPIKey(s.stores),
+		middleware.AuthAPIKey(s.stores, apiKeyResult),
 	)
 	mux.Handle("POST /api/v1/evaluate/flags/{key}", recoverMW(evaluateSingleHandler))
 
@@ -421,7 +429,7 @@ func (s *Server) Routes() http.Handler {
 		middleware.Logger(s.logger),
 		middleware.BodyLimit(1<<20),
 		middleware.RequireJSONContentType(),
-		middleware.AuthAPIKey(s.stores),
+		middleware.AuthAPIKey(s.stores, apiKeyResult),
 	)
 	mux.Handle("POST /api/v1/evaluate/flags", recoverMW(evaluateBulkHandler))
 
@@ -431,7 +439,7 @@ func (s *Server) Routes() http.Handler {
 			http.HandlerFunc(streamHandler.ServeSSE),
 			middleware.RequestID(),
 			middleware.Logger(s.logger),
-			middleware.AuthAPIKey(s.stores),
+			middleware.AuthAPIKey(s.stores, apiKeyResult),
 		),
 	))
 
@@ -439,7 +447,7 @@ func (s *Server) Routes() http.Handler {
 		http.HandlerFunc(s.handleSDKSnapshot),
 		middleware.RequestID(),
 		middleware.Logger(s.logger),
-		middleware.AuthAPIKey(s.stores),
+		middleware.AuthAPIKey(s.stores, apiKeyResult),
 	)
 	mux.Handle("GET /api/v1/sdk/snapshot", recoverMW(sdkSnapshotHandler))
 

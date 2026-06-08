@@ -25,6 +25,12 @@ type Metrics struct {
 	dbPoolConnectionsIdle  metric.Int64ObservableGauge
 	dbPoolAcquiredTotal    metric.Int64ObservableCounter
 	dbPoolAcquireWaitTotal metric.Float64ObservableCounter
+
+	authLoginTotal            metric.Int64Counter
+	authRefreshTotal          metric.Int64Counter
+	authLogoutTotal           metric.Int64Counter
+	authAPIKeyValidationTotal metric.Int64Counter
+	authRateLimitHitsTotal    metric.Int64Counter
 }
 
 // DBPoolStats is a backend-agnostic snapshot of pgxpool.Stat() values the
@@ -133,19 +139,64 @@ func NewMetrics(mp metric.MeterProvider) (*Metrics, error) {
 		return nil, fmt.Errorf("create engine.warnings total counter: %w", err)
 	}
 
+	authLogin, err := meter.Int64Counter(
+		"flagstone.auth.login.total",
+		metric.WithDescription("Total number of login attempts"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("flagstone.auth.login.total: %w", err)
+	}
+
+	authRefresh, err := meter.Int64Counter(
+		"flagstone.auth.refresh.total",
+		metric.WithDescription("Total number of token refresh attempts"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("flagstone.auth.refresh.total: %w", err)
+	}
+
+	authLogout, err := meter.Int64Counter(
+		"flagstone.auth.logout.total",
+		metric.WithDescription("Total number of logouts"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("flagstone.auth.logout.total: %w", err)
+	}
+
+	authAPIKeyValidation, err := meter.Int64Counter(
+		"flagstone.auth.apikey.validation.total",
+		metric.WithDescription("Total number of API key validations"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("flagstone.auth.apikey.validation.total: %w", err)
+	}
+
+	authRateLimitHits, err := meter.Int64Counter(
+		"flagstone.auth.ratelimit.hits.total",
+		metric.WithDescription("Total number of rate limit hits on authentication endpoints"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("flagstone.auth.ratelimit.hits.total: %w", err)
+	}
+
 	return &Metrics{
-		mp:                     mp,
-		evaluationsTotal:       evalTotal,
-		evaluationDuration:     evalDur,
-		engineErrorsTotal:      engineErr,
-		engineWarningsTotal:    engineWarn,
-		snapshotFetchDuration:  snapDur,
-		snapshotFetchTotal:     snapTotal,
-		sseConnectionsActive:   sseActive,
-		sseEventsPublished:     ssePub,
-		dbPoolConnectionsIdle:  dbIdle,
-		dbPoolAcquiredTotal:    dbAcq,
-		dbPoolAcquireWaitTotal: dbWaitTotal,
+		mp:                        mp,
+		evaluationsTotal:          evalTotal,
+		evaluationDuration:        evalDur,
+		engineErrorsTotal:         engineErr,
+		engineWarningsTotal:       engineWarn,
+		snapshotFetchDuration:     snapDur,
+		snapshotFetchTotal:        snapTotal,
+		sseConnectionsActive:      sseActive,
+		sseEventsPublished:        ssePub,
+		dbPoolConnectionsIdle:     dbIdle,
+		dbPoolAcquiredTotal:       dbAcq,
+		dbPoolAcquireWaitTotal:    dbWaitTotal,
+		authLoginTotal:            authLogin,
+		authRefreshTotal:          authRefresh,
+		authLogoutTotal:           authLogout,
+		authAPIKeyValidationTotal: authAPIKeyValidation,
+		authRateLimitHitsTotal:    authRateLimitHits,
 	}, nil
 }
 
@@ -229,4 +280,58 @@ func (m *Metrics) RegisterDBPoolStats(statFn func() DBPoolStats) error {
 		m.dbPoolAcquireWaitTotal,
 	)
 	return err
+}
+
+// RecordAuthLogin increments the login counter.
+func (m *Metrics) RecordAuthLogin(ctx context.Context, status, errorCode string) {
+	if m == nil || m.authLoginTotal == nil {
+		return
+	}
+	attrs := []attribute.KeyValue{
+		FlagstoneStatus.String(status),
+	}
+	if errorCode != "" {
+		attrs = append(attrs, FlagstoneAuthErrorCode.String(errorCode))
+	}
+	m.authLoginTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
+}
+
+// RecordAuthRefresh increments the token refresh counter.
+func (m *Metrics) RecordAuthRefresh(ctx context.Context, status string) {
+	if m == nil || m.authRefreshTotal == nil {
+		return
+	}
+	m.authRefreshTotal.Add(ctx, 1, metric.WithAttributes(
+		FlagstoneStatus.String(status),
+	))
+}
+
+// RecordAuthLogout increments the logout counter.
+func (m *Metrics) RecordAuthLogout(ctx context.Context) {
+	if m == nil || m.authLogoutTotal == nil {
+		return
+	}
+	m.authLogoutTotal.Add(ctx, 1, metric.WithAttributes(
+		FlagstoneStatus.String("success"),
+	))
+}
+
+// RecordAuthAPIKeyValidation increments the API key validation counter.
+func (m *Metrics) RecordAuthAPIKeyValidation(ctx context.Context, status string) {
+	if m == nil || m.authAPIKeyValidationTotal == nil {
+		return
+	}
+	m.authAPIKeyValidationTotal.Add(ctx, 1, metric.WithAttributes(
+		FlagstoneStatus.String(status),
+	))
+}
+
+// RecordAuthRateLimitHit increments the rate limit hit counter.
+func (m *Metrics) RecordAuthRateLimitHit(ctx context.Context, endpoint string) {
+	if m == nil || m.authRateLimitHitsTotal == nil {
+		return
+	}
+	m.authRateLimitHitsTotal.Add(ctx, 1, metric.WithAttributes(
+		FlagstoneAuthEndpoint.String(endpoint),
+	))
 }

@@ -73,7 +73,7 @@ func (rl *IPRateLimiter) cleanup() {
 
 // RateLimit returns middleware that enforces the given IPRateLimiter.
 // On limit exceeded it responds 429 with a Retry-After header.
-func RateLimit(limiter *IPRateLimiter) func(http.Handler) http.Handler {
+func RateLimit(limiter *IPRateLimiter, onLimit func()) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -81,6 +81,9 @@ func RateLimit(limiter *IPRateLimiter) func(http.Handler) http.Handler {
 				ip = r.RemoteAddr
 			}
 			if !limiter.Allow(ip) {
+				if onLimit != nil {
+					onLimit()
+				}
 				w.Header().Set("Retry-After", "60")
 				Error(w, r, http.StatusTooManyRequests,
 					"RATE_LIMITED", "Too many requests. Please try again later.")

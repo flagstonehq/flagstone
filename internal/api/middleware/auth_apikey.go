@@ -12,12 +12,20 @@ import (
 
 // AuthAPIKey validates a Bearer API key by computing its SHA-256 hash and
 // looking it up in the database. It injects the environment ID into the
-// request context on success.
-func AuthAPIKey(stores *storage.Stores) func(http.Handler) http.Handler {
+// request context on success. onResult, when non-nil, is called with the
+// validation outcome ("success", "missing_token", "invalid", "expired") so
+// callers can record metrics without coupling this package to telemetry.
+func AuthAPIKey(stores *storage.Stores, onResult func(status string)) func(http.Handler) http.Handler {
+	report := func(status string) {
+		if onResult != nil {
+			onResult(status)
+		}
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rawKey, ok := extractBearerToken(r)
 			if !ok {
+				report("missing_token")
 				Error(w, r, http.StatusUnauthorized,
 					"INVALID_CREDENTIALS", "Authentication is required.")
 				return
@@ -26,6 +34,7 @@ func AuthAPIKey(stores *storage.Stores) func(http.Handler) http.Handler {
 			keyHash := auth.HashAPIKey(rawKey)
 			key, err := stores.APIKeys.GetByHash(r.Context(), keyHash)
 			if err != nil {
+				report("invalid")
 				Error(w, r, http.StatusUnauthorized,
 					"INVALID_CREDENTIALS", "The provided API key is invalid or revoked.")
 				return
@@ -33,10 +42,12 @@ func AuthAPIKey(stores *storage.Stores) func(http.Handler) http.Handler {
 
 			now := time.Now().UTC()
 			if key.ExpiresAt != nil && !key.ExpiresAt.After(now) {
+				report("expired")
 				Error(w, r, http.StatusUnauthorized,
 					"INVALID_CREDENTIALS", "The provided API key is invalid or revoked.")
 				return
 			}
+			report("success")
 
 			go func(id uuid.UUID, usedAt time.Time, parent context.Context) {
 				ctx, cancel := context.WithTimeout(parent, 2*time.Second)

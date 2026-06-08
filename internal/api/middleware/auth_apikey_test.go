@@ -16,7 +16,7 @@ import (
 func TestAuthAPIKey_missingHeader(t *testing.T) {
 	skipIfNoDB(t)
 
-	handler := AuthAPIKey(testStores)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthAPIKey(testStores, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -30,7 +30,7 @@ func TestAuthAPIKey_missingHeader(t *testing.T) {
 func TestAuthAPIKey_unknownKey(t *testing.T) {
 	skipIfNoDB(t)
 
-	handler := AuthAPIKey(testStores)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthAPIKey(testStores, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -58,7 +58,7 @@ func TestAuthAPIKey_validKey(t *testing.T) {
 	err := testStores.APIKeys.Create(ctx, key)
 	require.NoError(t, err)
 
-	handler := AuthAPIKey(testStores)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthAPIKey(testStores, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		envFromCtx := EnvironmentIDFromContext(r.Context())
 		assert.Equal(t, envID, envFromCtx)
 		w.WriteHeader(http.StatusOK)
@@ -88,7 +88,7 @@ func TestAuthAPIKey_expiredKey(t *testing.T) {
 	}
 	require.NoError(t, testStores.APIKeys.Create(ctx, key))
 
-	handler := AuthAPIKey(testStores)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthAPIKey(testStores, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("handler must not be reached when key is expired")
 	}))
 
@@ -115,7 +115,7 @@ func TestAuthAPIKey_revokedKey(t *testing.T) {
 	require.NoError(t, testStores.APIKeys.Create(ctx, key))
 	require.NoError(t, testStores.APIKeys.Revoke(ctx, key.ID, time.Now()))
 
-	handler := AuthAPIKey(testStores)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthAPIKey(testStores, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("handler must not be reached when key is revoked")
 	}))
 
