@@ -73,6 +73,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.logger.Error("login: get user by email", zap.Error(err))
+		s.metrics.RecordAuthLogin(ctx, "failure", "INTERNAL_ERROR")
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		return
 	}
@@ -80,6 +81,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	count, err := s.stores.LoginAttempts.CountSince(ctx, user.ID, time.Now().UTC().Add(-loginLockoutWindow))
 	if err != nil {
 		s.logger.Error("login: count attempts", zap.Error(err))
+		s.metrics.RecordAuthLogin(ctx, "failure", "INTERNAL_ERROR")
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		return
 	}
@@ -109,6 +111,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password.")
 		default:
 			s.logger.Error("login: resolve tenant", zap.Error(err))
+			s.metrics.RecordAuthLogin(ctx, "failure", "INTERNAL_ERROR")
 			middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		}
 		return
@@ -121,6 +124,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	refreshRaw, refreshHash, err := auth.GenerateRefreshToken(32)
 	if err != nil {
 		s.logger.Error("login: generate refresh token", zap.Error(err))
+		s.metrics.RecordAuthLogin(ctx, "failure", "INTERNAL_ERROR")
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		return
 	}
@@ -137,6 +141,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.stores.Sessions.Create(ctx, session); err != nil {
 		s.logger.Error("login: create session", zap.Error(err))
+		s.metrics.RecordAuthLogin(ctx, "failure", "INTERNAL_ERROR")
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		return
 	}
@@ -144,6 +149,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	accessToken, err := auth.GenerateAccessToken(user.ID, tenantID, role, s.cfg.JWTSecret, s.cfg.AccessTokenTTL, session.ID)
 	if err != nil {
 		s.logger.Error("login: generate access token", zap.Error(err))
+		s.metrics.RecordAuthLogin(ctx, "failure", "INTERNAL_ERROR")
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		return
 	}
@@ -177,6 +183,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("refresh_token")
 	if err != nil || strings.TrimSpace(cookie.Value) == "" {
+		s.metrics.RecordAuthRefresh(r.Context(), "failure")
 		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid or expired refresh token.")
 		return
 	}
@@ -189,12 +196,14 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if !errors.Is(err, storage.ErrNotFound) {
 		s.logger.Error("refresh: revoked lookup", zap.Error(err))
+		s.metrics.RecordAuthRefresh(ctx, "failure")
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		return
 	}
 
 	session, err := s.stores.Sessions.GetByRefreshHash(ctx, refreshHash)
 	if err != nil {
+		s.metrics.RecordAuthRefresh(ctx, "failure")
 		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid or expired refresh token.")
 		return
 	}
@@ -202,18 +211,21 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	if !session.ExpiresAt.After(now) {
 		_ = s.stores.Sessions.DeleteByID(ctx, session.ID)
+		s.metrics.RecordAuthRefresh(ctx, "failure")
 		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid or expired refresh token.")
 		return
 	}
 
 	user, err := s.stores.Users.GetByID(ctx, session.UserID)
 	if err != nil {
+		s.metrics.RecordAuthRefresh(ctx, "failure")
 		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid or expired refresh token.")
 		return
 	}
 
 	role, err := s.stores.Members.GetRole(ctx, session.TenantID, session.UserID)
 	if err != nil {
+		s.metrics.RecordAuthRefresh(ctx, "failure")
 		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid or expired refresh token.")
 		return
 	}
@@ -221,6 +233,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	newRefreshRaw, newRefreshHash, err := auth.GenerateRefreshToken(32)
 	if err != nil {
 		s.logger.Error("refresh: generate refresh token", zap.Error(err))
+		s.metrics.RecordAuthRefresh(ctx, "failure")
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		return
 	}
@@ -252,6 +265,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return nil
 	}); err != nil {
 		s.logger.Error("refresh: rotate", zap.Error(err))
+		s.metrics.RecordAuthRefresh(ctx, "failure")
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		return
 	}
@@ -259,6 +273,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	accessToken, err := auth.GenerateAccessToken(user.ID, session.TenantID, role, s.cfg.JWTSecret, s.cfg.AccessTokenTTL, newSession.ID)
 	if err != nil {
 		s.logger.Error("refresh: generate access token", zap.Error(err))
+		s.metrics.RecordAuthRefresh(ctx, "failure")
 		middleware.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal server error occurred.")
 		return
 	}
