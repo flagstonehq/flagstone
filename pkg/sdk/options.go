@@ -25,6 +25,7 @@ type clientOptions struct {
 	bootstrapErr   error
 	onStatusChange []func(State)
 	store          DataStore
+	usageInterval  time.Duration
 }
 
 const (
@@ -121,6 +122,27 @@ func WithOnStatusChange(cb func(State)) Option {
 func WithDataStore(ds DataStore) Option {
 	return func(o *clientOptions) {
 		o.store = ds
+	}
+}
+
+// WithUsageReporting enables periodic reporting of per-flag usage counts
+// to the Flagstone server. Only aggregate counts and reasons are sent — no
+// flag values, user data, or targeting context. Default interval: 60s.
+func WithUsageReporting() Option {
+	return func(o *clientOptions) {
+		if o.usageInterval == 0 {
+			o.usageInterval = 60 * time.Second
+		}
+	}
+}
+
+// WithUsageReportingInterval sets a custom reporting interval. Implies
+// WithUsageReporting.
+func WithUsageReportingInterval(d time.Duration) Option {
+	return func(o *clientOptions) {
+		if d > 0 {
+			o.usageInterval = d
+		}
 	}
 }
 

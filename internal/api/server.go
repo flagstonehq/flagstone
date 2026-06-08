@@ -451,6 +451,16 @@ func (s *Server) Routes() http.Handler {
 	)
 	mux.Handle("GET /api/v1/sdk/snapshot", recoverMW(sdkSnapshotHandler))
 
+	sdkUsageHandler := s.withMiddleware(
+		http.HandlerFunc(s.handleSDKUsage),
+		middleware.RequestID(),
+		middleware.Logger(s.logger),
+		middleware.BodyLimit(1<<20),
+		middleware.RequireJSONContentType(),
+		middleware.AuthAPIKey(s.stores, apiKeyResult),
+	)
+	mux.Handle("POST /api/v1/sdk/usage", recoverMW(sdkUsageHandler))
+
 	return mux
 }
 

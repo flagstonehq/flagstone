@@ -34,6 +34,7 @@ type Client struct {
 	status        *clientStatus
 	closeOnce     sync.Once
 	store         DataStore
+	usageTracker  *usageTracker
 }
 
 // Initialized returns true once the SDK has a known state. It is a
@@ -85,6 +86,10 @@ func New(opts ...Option) (*Client, error) {
 		done:          make(chan struct{}),
 		status:        newClientStatus(),
 		store:         cfg.store,
+	}
+
+	if cfg.usageInterval > 0 {
+		c.usageTracker = newUsageTracker(c)
 	}
 
 	for _, cb := range cfg.onStatusChange {
@@ -164,6 +169,9 @@ func (c *Client) Start(ctx context.Context) error {
 		close(c.started)
 		go c.stream.run(runCtx)
 		go c.refreshLoop(runCtx)
+		if c.usageTracker != nil {
+			c.usageTracker.start(runCtx)
+		}
 	})
 	<-c.started
 	return c.startErr
@@ -173,7 +181,12 @@ func (c *Client) Start(ctx context.Context) error {
 // idempotent and safe to call concurrently. Evaluations still work
 // after Close — they serve the last snapshot from memory.
 func (c *Client) Close() error {
-	c.closeOnce.Do(func() { close(c.done) })
+	c.closeOnce.Do(func() {
+		if c.usageTracker != nil {
+			c.usageTracker.stop(context.Background())
+		}
+		close(c.done)
+	})
 	if c.store != nil {
 		return c.store.Close()
 	}
@@ -215,6 +228,9 @@ func (c *Client) All(_ context.Context, evalCtx map[string]any) (map[string]Valu
 			Segments:   snap.segments,
 			Context:    evalCtx,
 		})
+		if c.usageTracker != nil {
+			c.usageTracker.record(key, string(result.Reason))
+		}
 		out[key] = Value{Value: result.Value, Reason: result.Reason}
 	}
 	return out, nil

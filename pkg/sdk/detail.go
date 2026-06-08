@@ -54,6 +54,9 @@ type EvaluationDetail struct {
 func (c *Client) evalDetail(key string, evalCtx map[string]any) EvaluationDetail {
 	snap := c.cache.get()
 	if c.opts.offline && snap.fetchedAt.IsZero() {
+		if c.usageTracker != nil {
+			c.usageTracker.record(key, string(ReasonDefault))
+		}
 		return EvaluationDetail{
 			Reason:    ReasonDefault,
 			RuleIndex: -1,
@@ -61,6 +64,9 @@ func (c *Client) evalDetail(key string, evalCtx map[string]any) EvaluationDetail
 	}
 	if snap.fetchedAt.IsZero() {
 		c.signalRefresh()
+		if c.usageTracker != nil {
+			c.usageTracker.record(key, string(ReasonError))
+		}
 		return EvaluationDetail{
 			Reason:    ReasonError,
 			RuleIndex: -1,
@@ -69,6 +75,9 @@ func (c *Client) evalDetail(key string, evalCtx map[string]any) EvaluationDetail
 	}
 	fc, ok := snap.flags[key]
 	if !ok {
+		if c.usageTracker != nil {
+			c.usageTracker.record(key, string(ReasonFlagNotFound))
+		}
 		return EvaluationDetail{
 			Reason:    ReasonFlagNotFound,
 			RuleIndex: -1,
@@ -80,6 +89,9 @@ func (c *Client) evalDetail(key string, evalCtx map[string]any) EvaluationDetail
 		Segments:   snap.segments,
 		Context:    evalCtx,
 	})
+	if c.usageTracker != nil {
+		c.usageTracker.record(key, string(res.Reason))
+	}
 	return EvaluationDetail{
 		Value:     res.Value,
 		Reason:    res.Reason,
