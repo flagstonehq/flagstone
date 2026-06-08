@@ -1,0 +1,575 @@
+{
+  "id": null,
+  "uid": "flagstone",
+  "title": "Flagstone",
+  "description": "Feature flag server — observability dashboard. All metrics are emitted via OpenTelemetry and exposed as Prometheus metrics at :9464/metrics.",
+  "tags": ["flagstone", "feature-flags", "otel", "observability"],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 0,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h"]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": null,
+        "hide": 0
+      }
+    ]
+  },
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Flag Evaluations",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(flagstone_evaluations_total[$__rate_interval]))",
+          "legendFormat": "eval/s",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "title": "Evaluation Latency (p50 / p95 / p99)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s",
+          "custom": {
+            "lineInterpolation": "linear",
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "red", "value": 0.005 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(flagstone_evaluation_duration_seconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(flagstone_evaluation_duration_seconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(flagstone_evaluation_duration_seconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 8, "x": 4, "y": 0 }
+    },
+    {
+      "id": 3,
+      "title": "Evaluations by Reason",
+      "type": "piechart",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": []
+        }
+      },
+      "options": {
+        "pieType": "pie",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "legend": { "displayMode": "table", "placement": "right", "values": ["value"] }
+      },
+      "targets": [
+        {
+          "expr": "sum by (feature_flag_result_reason) (rate(flagstone_evaluations_total[$__rate_interval]))",
+          "legendFormat": "{{ feature_flag_result_reason }}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 }
+    },
+    {
+      "id": 4,
+      "title": "Active SSE Connections",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 50 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "targets": [
+        {
+          "expr": "flagstone_sse_connections_active",
+          "legendFormat": "connections",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 }
+    },
+    {
+      "id": 5,
+      "title": "Engine Errors",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineInterpolation": "linear", "showPoints": "never" },
+          "unit": "cps"
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "sum by (flagstone_engine_error_type) (rate(flagstone_engine_errors_total[$__rate_interval]))",
+          "legendFormat": "{{ flagstone_engine_error_type }}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 6 }
+    },
+    {
+      "id": 6,
+      "title": "Engine Warnings",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineInterpolation": "linear", "showPoints": "never" },
+          "unit": "cps"
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "sum by (flagstone_engine_warning_type) (rate(flagstone_engine_warnings_total[$__rate_interval]))",
+          "legendFormat": "{{ flagstone_engine_warning_type }}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 6 }
+    },
+    {
+      "id": 7,
+      "title": "SSE Events Published / s",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineInterpolation": "linear", "showPoints": "never" },
+          "unit": "cps"
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "sum by (flagstone_event_type) (rate(flagstone_sse_events_published_total[$__rate_interval]))",
+          "legendFormat": "{{ flagstone_event_type }}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 6 }
+    },
+    {
+      "id": 8,
+      "title": "Snapshot Fetch Latency (p50 / p95 / p99)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineInterpolation": "linear", "showPoints": "never" },
+          "unit": "s"
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(flagstone_snapshot_fetch_duration_seconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "p50",
+          "refId": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(flagstone_snapshot_fetch_duration_seconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "p95",
+          "refId": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(flagstone_snapshot_fetch_duration_seconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "p99",
+          "refId": "p99"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 12 }
+    },
+    {
+      "id": 9,
+      "title": "Snapshot Fetches / s",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(flagstone_snapshot_fetch_total[$__rate_interval]))",
+          "legendFormat": "fetches/s",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 3, "w": 4, "x": 8, "y": 12 }
+    },
+    {
+      "id": 10,
+      "title": "Snapshot Errors / s",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.1 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(flagstone_snapshot_fetch_total{flagstone_status=\"error\"}[$__rate_interval]))",
+          "legendFormat": "errors/s",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 3, "w": 4, "x": 8, "y": 15 }
+    },
+    {
+      "id": 11,
+      "title": "DB Pool — Idle Connections",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 20 },
+              { "color": "red", "value": 25 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "flagstone_db_pool_connections_idle",
+          "legendFormat": "idle",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 3, "w": 4, "x": 12, "y": 12 }
+    },
+    {
+      "id": 12,
+      "title": "DB Connections Acquired / s",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "rate(flagstone_db_pool_connections_acquired_total[$__rate_interval])",
+          "legendFormat": "acquire/s",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 3, "w": 4, "x": 12, "y": 15 }
+    },
+    {
+      "id": 13,
+      "title": "DB Acquire Wait / s",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "rate(flagstone_db_pool_acquire_wait_duration_seconds_total[$__rate_interval])",
+          "legendFormat": "wait/s",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 12 }
+    },
+    {
+      "id": 14,
+      "title": "Login Attempts by Status",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineInterpolation": "linear", "showPoints": "never" },
+          "unit": "cps"
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "sum by (flagstone_status) (rate(flagstone_auth_login_total[$__rate_interval]))",
+          "legendFormat": "{{ flagstone_status }}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 18 }
+    },
+    {
+      "id": 15,
+      "title": "Login Failures by Error Code",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineInterpolation": "linear", "showPoints": "never" },
+          "unit": "cps"
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "sum by (flagstone_auth_error_code) (rate(flagstone_auth_login_total{flagstone_status=\"failure\"}[$__rate_interval]))",
+          "legendFormat": "{{ flagstone_auth_error_code }}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 18 }
+    },
+    {
+      "id": 16,
+      "title": "API Key Validations by Status",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineInterpolation": "linear", "showPoints": "never" },
+          "unit": "cps"
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "sum by (flagstone_status) (rate(flagstone_auth_apikey_validation_total[$__rate_interval]))",
+          "legendFormat": "{{ flagstone_status }}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 18 }
+    },
+    {
+      "id": 17,
+      "title": "Token Refresh by Status",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineInterpolation": "linear", "showPoints": "never" },
+          "unit": "cps"
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "sum by (flagstone_status) (rate(flagstone_auth_refresh_total[$__rate_interval]))",
+          "legendFormat": "{{ flagstone_status }}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 24 }
+    },
+    {
+      "id": 18,
+      "title": "Rate Limit Hits by Endpoint",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineInterpolation": "linear", "showPoints": "never" },
+          "unit": "cps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "sum by (flagstone_auth_endpoint) (rate(flagstone_auth_ratelimit_hits_total[$__rate_interval]))",
+          "legendFormat": "{{ flagstone_auth_endpoint }}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 24 }
+    },
+    {
+      "id": 19,
+      "title": "Logouts / s",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(flagstone_auth_logout_total[$__rate_interval]))",
+          "legendFormat": "logout/s",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 24 }
+    }
+  ],
+  "refresh": "30s"
+}
