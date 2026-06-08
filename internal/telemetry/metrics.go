@@ -15,6 +15,9 @@ import (
 type Metrics struct {
 	mp                     metric.MeterProvider
 	evaluationsTotal       metric.Int64Counter
+	evaluationDuration     metric.Float64Histogram
+	engineErrorsTotal      metric.Int64Counter
+	engineWarningsTotal    metric.Int64Counter
 	snapshotFetchDuration  metric.Float64Histogram
 	snapshotFetchTotal     metric.Int64Counter
 	sseConnectionsActive   metric.Int64UpDownCounter
@@ -105,9 +108,37 @@ func NewMetrics(mp metric.MeterProvider) (*Metrics, error) {
 		return nil, fmt.Errorf("flagstone.db.pool.acquire.wait.duration: %w", err)
 	}
 
+	evalDur, err := meter.Float64Histogram(
+		"flagstone.evaluation.duration",
+		metric.WithDescription("Duration of flag evaluations"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create evaluation.duration histogram: %w", err)
+	}
+
+	engineErr, err := meter.Int64Counter(
+		"flagstone.engine.errors.total",
+		metric.WithDescription("Total number of engine errors, by type"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create engine.errors total counter: %w", err)
+	}
+
+	engineWarn, err := meter.Int64Counter(
+		"flagstone.engine.warnings.total",
+		metric.WithDescription("Total number of engine warnings, by type"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create engine.warnings total counter: %w", err)
+	}
+
 	return &Metrics{
 		mp:                     mp,
 		evaluationsTotal:       evalTotal,
+		evaluationDuration:     evalDur,
+		engineErrorsTotal:      engineErr,
+		engineWarningsTotal:    engineWarn,
 		snapshotFetchDuration:  snapDur,
 		snapshotFetchTotal:     snapTotal,
 		sseConnectionsActive:   sseActive,
@@ -124,6 +155,30 @@ func (m *Metrics) RecordEvaluation(ctx context.Context, attrs ...attribute.KeyVa
 		return
 	}
 	m.evaluationsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
+}
+
+// RecordEvaluationDuration records the latency of a single flag evaluation.
+func (m *Metrics) RecordEvaluationDuration(ctx context.Context, duration time.Duration, attrs ...attribute.KeyValue) {
+	if m == nil || m.evaluationDuration == nil {
+		return
+	}
+	m.evaluationDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(attrs...))
+}
+
+// RecordEngineError increments the engine error counter by type.
+func (m *Metrics) RecordEngineError(ctx context.Context, errType string, attrs ...attribute.KeyValue) {
+	if m == nil || m.engineErrorsTotal == nil {
+		return
+	}
+	m.engineErrorsTotal.Add(ctx, 1, metric.WithAttributes(append(attrs, FlagstoneEngineErrorType.String(errType))...))
+}
+
+// RecordEngineWarning increments the engine warning counter by type.
+func (m *Metrics) RecordEngineWarning(ctx context.Context, warnType string, attrs ...attribute.KeyValue) {
+	if m == nil || m.engineWarningsTotal == nil {
+		return
+	}
+	m.engineWarningsTotal.Add(ctx, 1, metric.WithAttributes(append(attrs, FlagstoneEngineWarningType.String(warnType))...))
 }
 
 // RecordSnapshotFetch records the duration and increments the count of snapshot fetches.
