@@ -1,5 +1,25 @@
 package engine
 
+// ErrorKind categorises engine-internal errors reported via OnError.
+type ErrorKind string
+
+const (
+	// ErrorKindPanic means the engine panicked during evaluation and recovered.
+	ErrorKindPanic ErrorKind = "panic"
+	// ErrorKindInvalidRegex means a regex operator had a malformed pattern.
+	ErrorKindInvalidRegex ErrorKind = "invalid_regex"
+)
+
+// WarningKind categorises engine-internal warnings reported via OnWarn.
+type WarningKind string
+
+const (
+	// WarnKindUnknownOp means a condition referenced an operator the engine does not implement.
+	WarnKindUnknownOp WarningKind = "unknown_op"
+	// WarnKindMaxConditionDepth means a condition tree exceeded the maximum nesting depth.
+	WarnKindMaxConditionDepth WarningKind = "max_condition_depth"
+)
+
 // Reason describes why an evaluation produced its result.
 type Reason string
 

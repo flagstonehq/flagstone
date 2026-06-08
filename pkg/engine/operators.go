@@ -114,6 +114,9 @@ func (e *Engine) evaluateLeaf(node ConditionNode, ctx map[string]any, segments m
 				zap.String("pattern", pattern),
 				zap.Error(err),
 			)
+			if e.OnError != nil {
+				e.OnError(ErrorKindInvalidRegex)
+			}
 			return false
 		}
 		return matched
@@ -128,6 +131,9 @@ func (e *Engine) evaluateLeaf(node ConditionNode, ctx map[string]any, segments m
 			zap.String("operator", op),
 			zap.String("attribute", attr),
 		)
+		if e.OnWarn != nil {
+			e.OnWarn(WarnKindUnknownOp)
+		}
 		return false
 	}
 }

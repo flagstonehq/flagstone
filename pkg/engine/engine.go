@@ -11,6 +11,13 @@ import (
 // and pass them in. This keeps the engine unit-testable with no mocks.
 type Engine struct {
 	logger *zap.Logger
+
+	// OnError, when set, is called for each engine-internal error
+	// (invalid regex, panic recovery, etc.). Nil is safe.
+	OnError func(ErrorKind)
+	// OnWarn, when set, is called for each engine-internal warning
+	// (unknown operator, max condition depth, etc.). Nil is safe.
+	OnWarn func(WarningKind)
 }
 
 // New creates an Engine backed by the given logger. One instance is
@@ -30,6 +37,9 @@ func (e *Engine) Evaluate(req EvaluateRequest) (result EvaluateResult) {
 				zap.Any("panic", r),
 				zap.ByteString("stack", debug.Stack()),
 			)
+			if e.OnError != nil {
+				e.OnError(ErrorKindPanic)
+			}
 			result = EvaluateResult{
 				Value:     false,
 				Reason:    ReasonInternalErr,

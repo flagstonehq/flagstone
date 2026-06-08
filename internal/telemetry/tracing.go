@@ -17,10 +17,12 @@ const (
 	FeatureFlagResultVariant = attribute.Key("feature_flag.result.variant")
 
 	// Flagstone-specific attribute keys.
-	FlagstoneEnvironment  = attribute.Key("flagstone.environment")
-	FlagstoneEventType    = attribute.Key("flagstone.event.type")
-	FlagstoneTargetingKey = attribute.Key("flagstone.targeting_key")
-	FlagstoneStatus       = attribute.Key("flagstone.status") // "success" | "error"
+	FlagstoneEnvironment       = attribute.Key("flagstone.environment")
+	FlagstoneEventType         = attribute.Key("flagstone.event.type")
+	FlagstoneTargetingKey      = attribute.Key("flagstone.targeting_key")
+	FlagstoneStatus            = attribute.Key("flagstone.status") // "success" | "error"
+	FlagstoneEngineErrorType   = attribute.Key("flagstone.engine.error_type")
+	FlagstoneEngineWarningType = attribute.Key("flagstone.engine.warning_type")
 )
 
 // WrapWithTracing wraps an http.Handler with otelhttp auto-instrumentation.

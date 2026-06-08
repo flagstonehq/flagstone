@@ -13,6 +13,7 @@ import (
 	"github.com/flagstonehq/flagstone/internal/telemetry"
 	"github.com/flagstonehq/flagstone/pkg/engine"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.uber.org/zap"
 )
@@ -126,11 +127,19 @@ func (s *Server) handleEvaluateFlag(w http.ResponseWriter, r *http.Request) {
 	defer span.End()
 	r = r.WithContext(ctx)
 
+	evalStart := time.Now()
 	result := s.engine.Evaluate(engine.EvaluateRequest{
 		FlagConfig: fc,
 		Segments:   segments,
 		Context:    req.Context,
 	})
+	evalDur := time.Since(evalStart)
+
+	attrs := []attribute.KeyValue{
+		telemetry.FeatureFlagKey.String(flagKey),
+		telemetry.FeatureFlagResultReason.String(string(result.Reason)),
+		telemetry.FlagstoneEnvironment.String(env.Slug),
+	}
 
 	span.SetAttributes(
 		telemetry.FeatureFlagResultVariant.String(fmt.Sprintf("%v", result.Value)),
@@ -142,11 +151,11 @@ func (s *Server) handleEvaluateFlag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.metrics != nil {
-		s.metrics.RecordEvaluation(ctx,
-			telemetry.FeatureFlagKey.String(flagKey),
-			telemetry.FeatureFlagResultReason.String(string(result.Reason)),
-			telemetry.FlagstoneEnvironment.String(env.Slug),
-		)
+		s.metrics.RecordEvaluation(ctx, attrs...)
+		s.metrics.RecordEvaluationDuration(ctx, evalDur, attrs...)
+		if result.Reason == engine.ReasonInternalErr {
+			s.metrics.RecordEngineError(ctx, string(engine.ErrorKindPanic))
+		}
 	}
 
 	middleware.JSON(w, http.StatusOK, evaluateFlagResponse{
@@ -218,15 +227,22 @@ func (s *Server) handleEvaluateFlags(w http.ResponseWriter, r *http.Request) {
 		flags = append(flags, fc)
 	}
 
+	evalStart := time.Now()
 	results := s.engine.EvaluateAll(flags, segments, req.Context)
+	evalDur := time.Since(evalStart)
 
 	if s.metrics != nil {
 		for key, res := range results {
-			s.metrics.RecordEvaluation(ctx,
+			attrs := []attribute.KeyValue{
 				telemetry.FeatureFlagKey.String(key),
 				telemetry.FeatureFlagResultReason.String(string(res.Reason)),
 				telemetry.FlagstoneEnvironment.String(env.Slug),
-			)
+			}
+			s.metrics.RecordEvaluation(ctx, attrs...)
+			s.metrics.RecordEvaluationDuration(ctx, evalDur, attrs...)
+			if res.Reason == engine.ReasonInternalErr {
+				s.metrics.RecordEngineError(ctx, string(engine.ErrorKindPanic))
+			}
 		}
 	}
 

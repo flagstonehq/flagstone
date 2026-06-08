@@ -59,12 +59,22 @@ func NewServer(stores *storage.Stores, dbPool *pgxpool.Pool, cfg *config.Config,
 	})
 	go hub.Run(context.Background())
 
+	eng := engine.New(logger)
+	if metrics != nil {
+		eng.OnError = func(kind engine.ErrorKind) {
+			metrics.RecordEngineError(context.Background(), string(kind))
+		}
+		eng.OnWarn = func(kind engine.WarningKind) {
+			metrics.RecordEngineWarning(context.Background(), string(kind))
+		}
+	}
+
 	return &Server{
 		stores:           stores,
 		dbPool:           dbPool,
 		cfg:              cfg,
 		logger:           logger,
-		engine:           engine.New(logger),
+		engine:           eng,
 		metrics:          metrics,
 		fakePasswordHash: fake,
 		loginLimiter:     middleware.NewIPRateLimiter(5, time.Minute),

@@ -8,6 +8,9 @@ func (e *Engine) evaluateNode(node ConditionNode, ctx map[string]any, segments m
 
 func (e *Engine) evaluateNodeDepth(node ConditionNode, ctx map[string]any, segments map[string]Segment, visited map[string]struct{}, depth int) bool {
 	if depth > maxConditionDepth {
+		if e.OnWarn != nil {
+			e.OnWarn(WarnKindMaxConditionDepth)
+		}
 		return false
 	}
 	nextDepth := depth + 1
