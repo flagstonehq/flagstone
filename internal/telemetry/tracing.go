@@ -23,6 +23,9 @@ const (
 	FlagstoneStatus            = attribute.Key("flagstone.status") // "success" | "error"
 	FlagstoneEngineErrorType   = attribute.Key("flagstone.engine.error_type")
 	FlagstoneEngineWarningType = attribute.Key("flagstone.engine.warning_type")
+	FlagstoneAuthMethod        = attribute.Key("flagstone.auth.method") // "jwt" | "apikey"
+	FlagstoneAuthErrorCode     = attribute.Key("flagstone.auth.error_code")
+	FlagstoneAuthEndpoint      = attribute.Key("flagstone.auth.endpoint") // "login" | "refresh"
 )
 
 // WrapWithTracing wraps an http.Handler with otelhttp auto-instrumentation.

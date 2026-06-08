@@ -40,7 +40,7 @@ func TestIPRateLimiter_WindowReset(t *testing.T) {
 
 func TestRateLimitMiddleware_Blocks(t *testing.T) {
 	rl := middleware.NewIPRateLimiter(2, time.Minute)
-	mw := middleware.RateLimit(rl)
+	mw := middleware.RateLimit(rl, nil)
 
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

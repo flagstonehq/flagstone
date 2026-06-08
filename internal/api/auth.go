@@ -68,6 +68,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, storage.ErrUserNotFound) {
 			_ = auth.VerifyPassword(s.fakePasswordHash, req.Password)
+			s.metrics.RecordAuthLogin(ctx, "failure", "INVALID_CREDENTIALS")
 			middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password.")
 			return
 		}
@@ -83,12 +84,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if count >= maxFailedLoginAttempts {
+		s.metrics.RecordAuthLogin(ctx, "failure", "ACCOUNT_LOCKED")
 		middleware.Error(w, r, http.StatusLocked, "ACCOUNT_LOCKED", "Account temporarily locked due to too many failed attempts. Try again later.")
 		return
 	}
 
 	if user.PasswordHash == nil || auth.VerifyPassword(*user.PasswordHash, req.Password) != nil {
 		s.recordFailedLogin(ctx, user.ID, r)
+		s.metrics.RecordAuthLogin(ctx, "failure", "INVALID_CREDENTIALS")
 		middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password.")
 		return
 	}
@@ -102,6 +105,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			errors.Is(err, errTenantMismatch),
 			errors.Is(err, storage.ErrTenantNotFound),
 			errors.Is(err, storage.ErrNotFound):
+			s.metrics.RecordAuthLogin(ctx, "failure", "INVALID_CREDENTIALS")
 			middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password.")
 		default:
 			s.logger.Error("login: resolve tenant", zap.Error(err))
@@ -161,6 +165,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("login: insert audit log", zap.Error(err))
 	}
 
+	s.metrics.RecordAuthLogin(ctx, "success", "")
 	s.setRefreshCookie(w, refreshRaw, now.Add(s.cfg.RefreshTokenTTL))
 	middleware.JSON(w, http.StatusOK, tokenResponse{
 		AccessToken: accessToken,
@@ -271,6 +276,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("refresh: insert audit log", zap.Error(err))
 	}
 
+	s.metrics.RecordAuthRefresh(ctx, "success")
 	s.setRefreshCookie(w, newRefreshRaw, now.Add(s.cfg.RefreshTokenTTL))
 	middleware.JSON(w, http.StatusOK, tokenResponse{
 		AccessToken: accessToken,
@@ -326,6 +332,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		s.logger.Error("logout: insert audit log", zap.Error(err))
 	}
+	s.metrics.RecordAuthLogout(ctx)
 	s.clearRefreshCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -348,6 +355,7 @@ func (s *Server) handleRefreshReuse(ctx context.Context, w http.ResponseWriter, 
 	}); err != nil {
 		s.logger.Error("refresh reuse: audit log", zap.Error(err))
 	}
+	s.metrics.RecordAuthRefresh(ctx, "reuse")
 	s.logger.Warn("refresh token reuse detected", zap.String("user_id", revoked.UserID.String()))
 	s.clearRefreshCookie(w)
 	middleware.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid or expired refresh token.")
