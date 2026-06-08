@@ -138,7 +138,7 @@ The [`diagrams/`](./diagrams/) folder contains a full architecture canvas export
 | Cache | **Redis 7+** | Distributed cache + pub/sub for multi-instance coordination |
 | Logging | **zap** (`go.uber.org/zap`) | High-performance structured logging in the eval hot path |
 | Observability | **OpenTelemetry** | Standardized traces + metrics + logs |
-| Web dashboard | **Next.js 15 + TypeScript** | Largest AI training-data corpus → best AI-assisted development |
+| Web dashboard | **Next.js 16 + TypeScript** | Largest AI training-data corpus → best AI-assisted development |
 | UI components | **shadcn/ui + Tailwind CSS** | Designer-quality components without being a designer |
 | Containers | **Docker** (split: API + Web) | Independent build/scale, single `docker-compose.yml` for self-host |
 | IaC | **Terraform** | Reproducible, versioned infrastructure |
@@ -146,7 +146,7 @@ The [`diagrams/`](./diagrams/) folder contains a full architecture canvas export
 | CI/CD | **GitHub Actions** | Community standard, free for OSS |
 | Tests | **testify + testcontainers-go** | Unit tests + integration with real DB |
 | Migrations | **golang-migrate** | Schema versioning |
-| Standards | **OpenFeature** (planned) | CNCF standard for feature flag evaluation |
+| Standards | **OpenFeature** | CNCF standard for feature flag evaluation |
 
 ## Features
 
@@ -164,7 +164,7 @@ The [`diagrams/`](./diagrams/) folder contains a full architecture canvas export
 
 ### Advanced
 
-- [ ] Multivariate flags (string/number/json variants)
+- [x] Multivariate flags (string/number/json variants)
 - [x] Real-time streaming (SSE)
 - [x] Multi-tenancy with isolation
 - [x] Dashboard web (CRUD + real-time)
@@ -172,16 +172,16 @@ The [`diagrams/`](./diagrams/) folder contains a full architecture canvas export
 - [ ] TypeScript and Python SDKs
 - [ ] Webhooks on changes
 - [x] Per-flag usage metrics (via OTel)
-- [ ] Rate limiting on API
+- [x] Rate limiting on API (auth endpoints)
 
 ### Differentiators
 
 - [x] OpenTelemetry traces on every evaluation with flag attributes
 - [x] Pre-configured Prometheus metrics
-- [ ] Example Grafana dashboard included
+- [x] Example Grafana dashboard included (`deploy/grafana/flagstone-dashboard.json`)
 - [x] Automatic log-trace correlation
 - [ ] Shadow mode: evaluate but don't apply, to measure impact before activating
-- [ ] OpenFeature provider (CNCF standard compatibility)
+- [x] OpenFeature provider (CNCF standard compatibility — `pkg/sdk/openfeature`)
 
 ## Usage Examples
 
@@ -327,7 +327,7 @@ Goal: a running server with secure auth, tenant-scoped flag CRUD, and rule evalu
 Goal: a production-ready client experience with streaming, caching, and a usable web UI.
 
 - SDK with local cache + SSE streaming (with `Last-Event-ID` replay)
-- Web dashboard in `web/` — **Next.js 15 + TypeScript + Tailwind + shadcn/ui** (see [DESIGN.md](./DESIGN.md#why-nextjs--shadcnui-for-the-web-dashboard))
+- Web dashboard in `web/` — **Next.js 16 + TypeScript + Tailwind + shadcn/ui** (see [DESIGN.md](./DESIGN.md#why-nextjs--shadcnui-for-the-web-dashboard))
 - Visual rule builder + inline "Try it" evaluation panel
 - Split container images: `Dockerfile.api` (Go, ~25MB) + `web/Dockerfile` (Next.js, ~120MB)
 - `docker-compose.yml` for one-command self-host (api + web + postgres + redis)
@@ -342,10 +342,10 @@ Goal: a production-ready client experience with streaming, caching, and a usable
 Goal: differentiation features and operations.
 
 - OpenTelemetry traces + metrics on every evaluation (the headline differentiator)
-- Pre-configured Grafana dashboard
+- [x] Pre-configured Grafana dashboard (`deploy/grafana/`)
 - Automated deploy to AWS via Terraform
 - Multi-tenant management UI (tenant switching, member invites, role changes)
-- OpenFeature Go provider
+- [x] OpenFeature Go provider (`pkg/sdk/openfeature`)
 - Complete documentation
 - API key expiration enforcement
 
@@ -374,16 +374,18 @@ flagstone/
 │   └── telemetry/          # OpenTelemetry setup
 ├── pkg/
 │   └── sdk/                # Go SDK (importable by third parties)
-├── web/                    # Next.js 15 dashboard (TypeScript + Tailwind + shadcn/ui)
+│       └── openfeature/    # OpenFeature FeatureProvider adapter
+├── web/                    # Next.js 16 dashboard (TypeScript + Tailwind + shadcn/ui)
 │   ├── app/                # App Router pages and layouts
 │   ├── components/         # shadcn/ui components + custom components
 │   ├── lib/                # API client, hooks, utilities
 │   ├── package.json
-│   └── Dockerfile          # Next.js production image
+│   └── Dockerfile          # Next.js 16 production image
 ├── migrations/             # SQL migrations (golang-migrate)
 │   ├── 000001_init.up.sql
 │   └── 000002_email_flows.up.sql
 ├── deploy/
+│   ├── grafana/            # Pre-built Grafana dashboard (flagstone-dashboard.json)
 │   └── terraform/          # AWS infrastructure as code
 ├── diagrams/               # Excalidraw architecture diagrams (SVG + PNG)
 ├── .github/
@@ -400,18 +402,36 @@ flagstone/
 
 ## Local Development
 
-### Quickstart (Docker — recommended)
+### Quickstart — first flag in under 2 minutes
 
 ```bash
+# 1. Start Flagstone (Postgres, Redis, API, web dashboard)
 git clone https://github.com/flagstonehq/flagstone
 cd flagstone
-docker compose up -d                        # postgres, redis, migrate, api, web
-docker compose --profile seed run --rm seed  # one-time demo data
-open http://localhost:3000                   # Login: admin@acme.com / password123
+docker compose up -d
+
+# 2. Seed demo data — note the API key printed for "production"
+docker compose --profile seed run --rm seed
+
+# 3. Verify everything is running
+curl http://localhost:8080/readyz
+
+# 4. Evaluate a flag via curl (replace $KEY with the production API key from step 2)
+curl -s http://localhost:8080/api/v1/evaluate/flags/new-checkout \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"context": {"email": "dev@company.com", "plan": "premium"}}'
+# {"key":"new-checkout","value":true,"reason":"RULE_MATCH","rule_index":1,...}
+
+# 5. Open the web dashboard
+open http://localhost:3000   # admin@acme.com / password123
 ```
 
-This starts everything: Postgres, Redis, runs migrations, the Go API, and the Next.js dashboard.
-The `seed` service provisions a demo tenant, project, flags, segments, and API keys.
+This starts Postgres, Redis, the Go API on `:8080`, and the web dashboard on `:3000`.
+The seed service provisions a demo tenant (Acme), a project (My App), three
+environments (development/staging/production), three feature flags
+(`new-checkout`, `dark-mode`, `max-items`), three segments, and API keys for
+each environment. You can also use `make demo` (same as steps 1-2).
 
 ### Developer setup (Go + Node)
 
@@ -517,10 +537,9 @@ Currently a solo-dev project in early development. Once it reaches Milestone 2, 
 
 Areas where help will be especially welcome:
 
-- SDKs in new languages
+- SDKs in new languages (TypeScript, Python)
 - Documented use cases
 - Performance benchmarks
-- OpenFeature provider implementation
 
 ## License
 
