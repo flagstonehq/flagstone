@@ -31,6 +31,7 @@ type Metrics struct {
 	authLogoutTotal           metric.Int64Counter
 	authAPIKeyValidationTotal metric.Int64Counter
 	authRateLimitHitsTotal    metric.Int64Counter
+	sdkUsageReportedTotal     metric.Int64Counter
 }
 
 // DBPoolStats is a backend-agnostic snapshot of pgxpool.Stat() values the
@@ -179,6 +180,14 @@ func NewMetrics(mp metric.MeterProvider) (*Metrics, error) {
 		return nil, fmt.Errorf("flagstone.auth.ratelimit.hits.total: %w", err)
 	}
 
+	sdkUsageTotal, err := meter.Int64Counter(
+		"flagstone.sdk.usage.reported.total",
+		metric.WithDescription("Total number of SDK usage reports received"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("flagstone.sdk.usage.reported.total: %w", err)
+	}
+
 	return &Metrics{
 		mp:                        mp,
 		evaluationsTotal:          evalTotal,
@@ -197,15 +206,25 @@ func NewMetrics(mp metric.MeterProvider) (*Metrics, error) {
 		authLogoutTotal:           authLogout,
 		authAPIKeyValidationTotal: authAPIKeyValidation,
 		authRateLimitHitsTotal:    authRateLimitHits,
+		sdkUsageReportedTotal:     sdkUsageTotal,
 	}, nil
 }
 
-// RecordEvaluation increments the evaluation counter with the given attributes.
+// RecordEvaluation increments the evaluation counter by 1 with the given attributes.
 func (m *Metrics) RecordEvaluation(ctx context.Context, attrs ...attribute.KeyValue) {
 	if m == nil || m.evaluationsTotal == nil {
 		return
 	}
 	m.evaluationsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
+}
+
+// RecordEvaluationsBulk increments the evaluation counter by n. Used by the
+// /sdk/usage handler to credit locally-evaluated flags in bulk.
+func (m *Metrics) RecordEvaluationsBulk(ctx context.Context, n int64, attrs ...attribute.KeyValue) {
+	if m == nil || m.evaluationsTotal == nil || n <= 0 {
+		return
+	}
+	m.evaluationsTotal.Add(ctx, n, metric.WithAttributes(attrs...))
 }
 
 // RecordEvaluationDuration records the latency of a single flag evaluation.
@@ -334,4 +353,12 @@ func (m *Metrics) RecordAuthRateLimitHit(ctx context.Context, endpoint string) {
 	m.authRateLimitHitsTotal.Add(ctx, 1, metric.WithAttributes(
 		FlagstoneAuthEndpoint.String(endpoint),
 	))
+}
+
+// RecordSDKUsageReport increments the SDK usage report counter.
+func (m *Metrics) RecordSDKUsageReport(ctx context.Context) {
+	if m == nil || m.sdkUsageReportedTotal == nil {
+		return
+	}
+	m.sdkUsageReportedTotal.Add(ctx, 1)
 }
