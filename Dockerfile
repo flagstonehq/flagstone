@@ -25,7 +25,7 @@ ARG MIGRATE_VERSION=4.18.3
 RUN wget -qO- "https://github.com/golang-migrate/migrate/releases/download/v${MIGRATE_VERSION}/migrate.linux-amd64.tar.gz" \
     | tar xz -C /bin/ migrate
 
-FROM alpine:3.23
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates tzdata wget
 
